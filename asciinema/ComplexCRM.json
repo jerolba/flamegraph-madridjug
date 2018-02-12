@@ -1,0 +1,458 @@
+{
+  "version": 1,
+  "width": 235,
+  "height": 45,
+  "duration": 82.899994,
+  "command": null,
+  "title": null,
+  "env": {
+    "TERM": "xterm-256color",
+    "SHELL": "/bin/bash"
+  },
+  "stdout": [
+    [
+      0.258027,
+      "\u001b[?1034hbash-3.2$ "
+    ],
+    [
+      1.192025,
+      "java  -cp target/MyCRM.jar com.jerolba.codemotion.ComplexCRM  "
+    ],
+    [
+      0.945037,
+      "\r\n"
+    ],
+    [
+      1.135281,
+      "19:49:30.134 INFO c.j.c.ComplexCRM$LargeProcess - Loading 1233 customers\r\n"
+    ],
+    [
+      1.305863,
+      "19:49:31.446 INFO c.j.c.ComplexCRM$LargeProcess - Loading 435828 invoices\r\n"
+    ],
+    [
+      2.305244,
+      "19:49:33.751 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 192886\r\n"
+    ],
+    [
+      0.269982,
+      "19:49:34.022 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 14364\r\n"
+    ],
+    [
+      0.07861,
+      "19:49:34.100 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 23181\r\n"
+    ],
+    [
+      0.301239,
+      "19:49:34.401 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 293038\r\n"
+    ],
+    [
+      0.520272,
+      "19:49:34.922 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 118194\r\n"
+    ],
+    [
+      0.675549,
+      "19:49:35.597 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 111767\r\n"
+    ],
+    [
+      0.465183,
+      "19:49:36.062 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 302633\r\n"
+    ],
+    [
+      0.118201,
+      "19:49:36.181 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 391288\r\n"
+    ],
+    [
+      0.001377,
+      "19:49:36.182 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 115785\r\n"
+    ],
+    [
+      0.463867,
+      "19:49:36.645 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 42857\r\n"
+    ],
+    [
+      0.532051,
+      "19:49:37.178 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 214073\r\n"
+    ],
+    [
+      0.24389,
+      "19:49:37.422 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 217128\r\n"
+    ],
+    [
+      5.775714,
+      "19:49:43.197 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 68228\r\n"
+    ],
+    [
+      0.640537,
+      "19:49:43.838 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 414236\r\n"
+    ],
+    [
+      0.171208,
+      "19:49:44.009 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 378388\r\n"
+    ],
+    [
+      0.068721,
+      "19:49:44.078 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 174092\r\n"
+    ],
+    [
+      5.01471,
+      "19:49:49.092 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 422516\r\n"
+    ],
+    [
+      0.355166,
+      "19:49:49.448 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 297128\r\n"
+    ],
+    [
+      0.015226,
+      "19:49:49.463 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 312796\r\n"
+    ],
+    [
+      0.358222,
+      "19:49:49.821 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 324851\r\n"
+    ],
+    [
+      0.151229,
+      "19:49:49.973 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 223630\r\n"
+    ],
+    [
+      0.307018,
+      "19:49:50.279 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 268824\r\n"
+    ],
+    [
+      6.242909,
+      "19:49:56.522 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 170808\r\n"
+    ],
+    [
+      0.522435,
+      "19:49:57.045 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 93319\r\n"
+    ],
+    [
+      0.631197,
+      "19:49:57.676 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 109066\r\n"
+    ],
+    [
+      0.436033,
+      "19:49:58.112 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 364191\r\n"
+    ],
+    [
+      4.94497,
+      "19:50:03.057 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 327752\r\n"
+    ],
+    [
+      0.551674,
+      "19:50:03.609 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 165453\r\n"
+    ],
+    [
+      0.423109,
+      "19:50:04.032 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 242290\r\n"
+    ],
+    [
+      0.292895,
+      "19:50:04.325 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 412907\r\n"
+    ],
+    [
+      7.936146,
+      "19:50:12.261 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 38328\r\n"
+    ],
+    [
+      0.326669,
+      "19:50:12.588 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 407581\r\n"
+    ],
+    [
+      0.41915,
+      "19:50:13.006 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 207164\r\n"
+    ],
+    [
+      0.264268,
+      "19:50:13.271 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 37372\r\n"
+    ],
+    [
+      0.149523,
+      "19:50:13.419 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 165207\r\n"
+    ],
+    [
+      0.214048,
+      "19:50:13.634 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 391673\r\n"
+    ],
+    [
+      0.472485,
+      "19:50:14.107 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 310991\r\n"
+    ],
+    [
+      0.615104,
+      "19:50:14.722 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 247759\r\n"
+    ],
+    [
+      0.415395,
+      "19:50:15.137 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 319198\r\n"
+    ],
+    [
+      5.762543,
+      "19:50:20.900 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 233089\r\n"
+    ],
+    [
+      0.544121,
+      "19:50:21.444 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 282711\r\n"
+    ],
+    [
+      0.139258,
+      "19:50:21.583 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 341383\r\n"
+    ],
+    [
+      0.431251,
+      "19:50:22.015 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 42996\r\n"
+    ],
+    [
+      5.552082,
+      "19:50:27.567 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 256148\r\n"
+    ],
+    [
+      0.046517,
+      "19:50:27.613 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 191728\r\n"
+    ],
+    [
+      0.502636,
+      "19:50:28.116 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 99213\r\n"
+    ],
+    [
+      0.460734,
+      "19:50:28.576 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 319824\r\n"
+    ],
+    [
+      0.686559,
+      "19:50:29.263 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 194763\r\n"
+    ],
+    [
+      0.528293,
+      "19:50:29.792 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 181169\r\n"
+    ],
+    [
+      0.215654,
+      "19:50:30.007 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 263232\r\n"
+    ],
+    [
+      0.6036,
+      "19:50:30.611 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 47358\r\n"
+    ],
+    [
+      0.082482,
+      "19:50:30.693 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 145739\r\n"
+    ],
+    [
+      0.514702,
+      "19:50:31.208 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 211282\r\n"
+    ],
+    [
+      0.320852,
+      "19:50:31.529 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 253295\r\n"
+    ],
+    [
+      0.301374,
+      "19:50:31.830 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 182315\r\n"
+    ],
+    [
+      0.026632,
+      "19:50:31.856 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 230630\r\n"
+    ],
+    [
+      0.483961,
+      "19:50:32.341 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 317027\r\n"
+    ],
+    [
+      0.43516,
+      "19:50:32.775 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 93154\r\n"
+    ],
+    [
+      0.043602,
+      "19:50:32.820 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 109315\r\n"
+    ],
+    [
+      0.300899,
+      "19:50:33.120 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 201307\r\n"
+    ],
+    [
+      0.280427,
+      "19:50:33.401 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 262676\r\n"
+    ],
+    [
+      0.282283,
+      "19:50:33.683 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 306696\r\n"
+    ],
+    [
+      0.326685,
+      "19:50:34.010 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 167541\r\n"
+    ],
+    [
+      0.627176,
+      "19:50:34.637 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 132423\r\n"
+    ],
+    [
+      0.025728,
+      "19:50:34.663 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 204663\r\n"
+    ],
+    [
+      0.596947,
+      "19:50:35.260 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 148543\r\n"
+    ],
+    [
+      0.201443,
+      "19:50:35.461 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 318821\r\n"
+    ],
+    [
+      0.638045,
+      "19:50:36.099 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 92044\r\n"
+    ],
+    [
+      0.421179,
+      "19:50:36.520 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 274081\r\n"
+    ],
+    [
+      0.460435,
+      "19:50:36.981 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 316692\r\n"
+    ],
+    [
+      0.305674,
+      "19:50:37.286 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 20081\r\n"
+    ],
+    [
+      0.300475,
+      "19:50:37.587 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 309900\r\n"
+    ],
+    [
+      0.134367,
+      "19:50:37.721 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 34778\r\n"
+    ],
+    [
+      0.089809,
+      "19:50:37.811 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 410086\r\n"
+    ],
+    [
+      0.520012,
+      "19:50:38.331 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 331541\r\n"
+    ],
+    [
+      0.489162,
+      "19:50:38.820 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 336071\r\n"
+    ],
+    [
+      0.190239,
+      "19:50:39.010 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 237902\r\n"
+    ],
+    [
+      1.381156,
+      "19:50:40.392 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 83950\r\n"
+    ],
+    [
+      0.663738,
+      "19:50:41.055 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 337498\r\n"
+    ],
+    [
+      0.694173,
+      "19:50:41.750 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 350914\r\n"
+    ],
+    [
+      0.603738,
+      "19:50:42.353 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 4765\r\n"
+    ],
+    [
+      0.690202,
+      "19:50:43.043 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 113357\r\n"
+    ],
+    [
+      0.142416,
+      "19:50:43.186 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 304250\r\n"
+    ],
+    [
+      0.482899,
+      "19:50:43.669 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 60889\r\n"
+    ],
+    [
+      0.379436,
+      "19:50:44.048 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 67096\r\n"
+    ],
+    [
+      0.102251,
+      "19:50:44.149 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 168204\r\n"
+    ],
+    [
+      0.173483,
+      "19:50:44.324 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 289807\r\n"
+    ],
+    [
+      0.596958,
+      "19:50:44.921 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 263133\r\n"
+    ],
+    [
+      0.617686,
+      "19:50:45.539 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 355826\r\n"
+    ],
+    [
+      0.385161,
+      "19:50:45.924 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 50869\r\n"
+    ],
+    [
+      0.415045,
+      "19:50:46.339 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 62541\r\n"
+    ],
+    [
+      0.044017,
+      "19:50:46.383 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 275635\r\n"
+    ],
+    [
+      0.046613,
+      "19:50:46.430 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 329823\r\n"
+    ],
+    [
+      0.088539,
+      "19:50:46.518 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 391315\r\n"
+    ],
+    [
+      0.232888,
+      "19:50:46.751 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 140559\r\n"
+    ],
+    [
+      0.231566,
+      "19:50:46.982 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 246443\r\n"
+    ],
+    [
+      0.417637,
+      "19:50:47.400 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 186307\r\n"
+    ],
+    [
+      0.510862,
+      "19:50:47.911 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 315773\r\n"
+    ],
+    [
+      0.447679,
+      "19:50:48.359 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 410318\r\n"
+    ],
+    [
+      0.044076,
+      "19:50:48.402 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 2052\r\n"
+    ],
+    [
+      0.022826,
+      "19:50:48.425 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 387342\r\n"
+    ],
+    [
+      0.693008,
+      "19:50:49.119 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 166525\r\n"
+    ],
+    [
+      0.107684,
+      "19:50:49.226 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 232460\r\n"
+    ],
+    [
+      0.215326,
+      "19:50:49.442 INFO c.j.c.ComplexCRM$LargeProcess - Processing invoice 418614\r\n"
+    ],
+    [
+      0.043671,
+      "^C"
+    ],
+    [
+      0.020095,
+      "bash-3.2$ "
+    ]
+  ]
+}

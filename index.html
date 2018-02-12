@@ -1,0 +1,572 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>Flame Graphs: Profiling de CPU en la JVM</title>
+
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/solarized.css">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<link rel="stylesheet" type="text/css" href="asciinema/asciinema-player.css" />
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+		<style>
+			.imgcoll img {
+				vertical-align: middle;
+			}
+			section .code-style {
+				font-family: courier; 
+				font-size: 67%; 
+				background-color: white; 
+				padding: 8px 8px;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section>
+					<br/><br/>
+					<h1 style="font-size: 3.0em;">Flame Graphs</h1>
+					<h3>Profiling de CPU en la JVM</h3>
+					<small><a href="http://www.jerolba.com">Jerónimo López</a> / <a href="http://twitter.com/jerolba">@jerolba</a></small>
+					<br/>
+					<small>13 / Febrero / 2018</small>
+					<br/>
+					<img src="images/MadridJUG.png" class="plain" style="width: 17%;"/>
+				</section>
+				
+				<section data-background="#ffffff">
+					<h2>Acerca de Jero</h2>
+					<div class="imgcoll">
+						<img src="images/JavaLogo.png" class="plain"/>
+						<img src="images/MadridJugLogo.png" class="plain"/><br/>
+						<img src="images/OtogamiLogo.png" class="plain" style="width: 33%;"/>
+						<br/>
+						<img src="images/NextailLogo.png" class="plain" style="width: 37%;"/>
+					</div>
+				</section>
+
+				<section>
+					<h2>Disclaimer</h2>
+					<img src="images/Hacker.jpg" class="plain"/>
+					<p>No soy ningún hacker de perf, de JVM, ni de sistemas.</p>
+				</section>
+
+				<section>
+					<h2>Objetivo de la charla</h2>
+					<ul>
+						<li>En qué consiste el profiling </li>
+						<li>Diferentes técnicas de profiling</li>
+						<li>De donde sale y cómo leer un Flame Graph</li>
+						<li>Cómo generar un Flame Graph</li>
+						<li><strike>Localizar y resolver problemas con Flame Graph</strike></li>
+					</ul>
+				</section>
+
+				<section data-background-image="images/DonaldKnuth.jpg">
+					<p>&nbsp;</p>
+					<h2 style="color: white;">Premature optimization </h2>
+					<div style="color: white; background-color: rgba(101, 119, 124, 0.788); padding: 5px 30px;">
+						<p style="text-align: left">&ldquo;We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil&rdquo;</p>
+						<p style="text-align: right">Donald Kunth</p>
+					</div>
+				</section>
+	
+				<!--section>
+					<h2>¿Qué es el profiling?</h2>
+					<p><q cite="https://es.wikipedia.org/wiki/An%C3%A1lisis_de_rendimiento_de_software">&ldquo;Es la investigación del comportamiento de un programa de computadora usando información reunida desde el análisis dinámico del mismo&rdquo;.</q></p>
+					<span style="position: fixed;top: 10px;left:10px;"><img src="images/WikipediaLogo.png" class="plain" width="120px;"/></span>
+				</section-->
+
+				<section>
+					<h3>¿Nunca te ha pasado...?</h3>
+					<asciinema-player src="asciinema/ComplexCRM.json" cols="120" rows="20" font-size="medium"></asciinema-player>
+				</section>
+
+				<section>
+					<h3>Conseguir algo como esto</h3>
+					<img src="images/FlamegraphSpark.png" class="plain" style="max-width: 85%;">
+				</section>
+
+				<section>
+					<h3>Flame Graphs</h3>
+					<ul style="width: 65%;">
+						<br/>
+						<li>Inventados por Brendan Gregg</li>
+						<li>Referencia en análisis de performance</li>
+						<li>Desarrollado en Joyent y Netflix</li>
+						<li><a href="http://www.brendangregg.com/flamegraphs.html" style="font-size: 30px;">http://www.brendangregg.com/flamegraphs.html</a></li>
+						<!--li><a href="http://queue.acm.org/detail.cfm?id=2927301" style="font-size: 30px;">http://queue.acm.org/detail.cfm?id=2927301</a></li-->
+					</ul>
+					<img src="images/BrendanGregg.jpg" class="plain" style="width: 30%; float: left;"/>
+				</section>
+				<section>
+					<h3>Flame Graphs</h3>
+					<p>&ldquo;Flame graphs are a <strong>visualization</strong> of profiled software, allowing the most frequent code-paths to be identified quickly and accurately&rdquo;</p>
+				</section>	
+				<section>
+					<h3>Profiling vs Sampling</h3>
+					<ul>
+						<li><strong>Profiling:</strong> instrumenta el código para medir el tiempo de ejecución de cada método.</li>
+						<li><strong>Sampling:</strong> toma muestras del estado de la máquina con cierta frecuencia.</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Profiling mediante sampling</h3>
+					<ul>
+						<li>Recolectar la mayor cantidad posible de <i>stacks</i> por segundo sin afectar el rendimiento</li>
+						<li>Representarlos visualmente:</li>
+						<ul style="margin-top: 20px; margin-left: 60px;">
+							<li>Hot methods</li>
+							<li>Call Tree</li>
+							<li>Flame Graph</li>
+						</ul>
+					</ul>
+				</section>
+				<section>
+					<h3>Hot Methods</h3>
+					<img src="images/HotMethods.png" style="width: 140%;" class="plain"/>
+				</section>
+				<section>
+					<h3>Call tree</h3>
+					<img src="images/CallTree.png" style="width: 130%;" class="plain"/>
+				</section>
+				<section>
+					<h3>Flame Graph</h3>
+					<a href="images/ElQuijote - Sample1 - JFR.svg" target="_blank"><img src="images/ElQuijote - Sample1 - JFR.svg" class="plain"/></a> 
+				</section>
+				<section data-background="#ffffff">
+					<h3>Proceso</h3>
+					<img src="images/ChainFlameGraph.png" class="plain"/>
+				</section>
+				<section>
+					<h3>¿Cómo es un sample en jstack?</h3>
+						<pre style="box-shadow: 0px 0px;">
+							<code class="hljs php" style="font-size: 65%;line-height: 1.4em;">"main" #1 prio=5 os_prio=31 tid=0x00007f904c00c000 nid=0x1703 runnable [0x0000700000219000]
+	java.lang.Thread.State: RUNNABLE
+		at com.jerolba.codemotion.ElQuijote.toLowerCase(ElQuijote.java:98)
+		at com.jerolba.codemotion.ElQuijote.lambda$toLowerCase$3(ElQuijote.java:71)
+		at com.jerolba.codemotion.ElQuijote$$Lambda$6/2030562336.apply(Unknown Source)
+		at java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:193)
+		at java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1374)
+		at java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:481)
+		at java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:471)
+		at java.util.stream.ReduceOps$ReduceOp.evaluateSequential(ReduceOps.java:708)
+		at java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+		at java.util.stream.ReferencePipeline.collect(ReferencePipeline.java:499)
+		at com.jerolba.codemotion.ElQuijote.toLowerCase(ElQuijote.java:71)
+		at com.jerolba.codemotion.ElQuijote.readBook(ElQuijote.java:43)
+		at com.jerolba.codemotion.ElQuijote.main(ElQuijote.java:30)
+						</code>
+					</pre>	
+				</section>			
+				<section>
+					<h3>¿Cómo es un sample en perf?</h3>
+					<pre style="box-shadow: 0px 0px;">
+						<code class="hljs php" style="font-size: 65%;line-height: 1.4em;">java   339/363   [002] 7628263.042557: cycles: 
+ffffffff8104f45a native_write_msr_safe ([kernel.kallsyms])
+ffffffff8102f8bc intel_pmu_enable_all ([kernel.kallsyms])
+ffffffff81029b14 x86_pmu_enable ([kernel.kallsyms])
+ffffffff81142a77 perf_pmu_enable ([kernel.kallsyms])
+ffffffff81027bfa x86_pmu_commit_txn ([kernel.kallsyms])
+ffffffff811434f0 group_sched_in ([kernel.kallsyms])
+ffffffff811439b2 __perf_event_enable ([kernel.kallsyms])
+ffffffff8113f620 remote_function ([kernel.kallsyms])
+ffffffff810dc880 generic_smp_call_function_single_interrupt ([kernel.kallsyms])
+ffffffff81040ac7 smp_call_function_single_interrupt ([kernel.kallsyms])
+ffffffff81732a5d call_function_single_interrupt ([kernel.kallsyms])
+ffffffff8160b55e sock_aio_write ([kernel.kallsyms])
+ffffffff811bd4aa do_sync_write ([kernel.kallsyms])
+ffffffff811bdd2d vfs_write ([kernel.kallsyms])
+ffffffff811be669 sys_write ([kernel.kallsyms])
+ffffffff8173186d system_call_fastpath ([kernel.kallsyms])
+	7f35c130035d [unknown] (/lib/x86_64-linux-gnu/libpthread-2.19.so)
+	7f35a979cb8b Lsun/nio/ch/FileDispatcherImpl;.write0 (/tmp/perf-339.map)
+	7f35a987dadc Lsun/nio/ch/SocketChannelImpl;.write (/tmp/perf-339.map)
+	7f35a9878a50 Lio/netty/channel/nio/AbstractNioByteChannel;.doWrite (/tmp/perf-339.map)
+	7f35a986f204 Lio/netty/channel/DefaultChannelPipeline$HeadContext;.flush (/tmp/perf-339.map)
+	7f35a97ba324 Lio/netty/channel/AbstractChannelHandlerContext;.flush (/tmp/perf-339.map)
+	7f35a98644e4 Lio/netty/channel/ChannelOutboundHandlerAdapter;.flush (/tmp/perf-339.map)
+	7f35a97ba324 Lio/netty/channel/AbstractChannelHandlerContext;.flush (/tmp/perf-339.map)
+	7f35a9863624 Lio/netty/channel/ChannelDuplexHandler;.flush (/tmp/perf-339.map)
+	7f35a97ba324 Lio/netty/channel/AbstractChannelHandlerContext;.flush (/tmp/perf-339.map)
+	7f35a935c438 Lorg/vertx/java/core/net/impl/VertxHandler;.channelReadComplete (/tmp/perf-339.map)
+	7f35a92e11d4 Lio/netty/channel/AbstractChannelHandlerContext;.fireChannelReadComplete (/tmp/perf-339.map)
+	7f35a935cc98 Lio/netty/handler/codec/ByteToMessageDecoder;.channelReadComplete (/tmp/perf-339.map)
+	7f35a92e11d4 Lio/netty/channel/AbstractChannelHandlerContext;.fireChannelReadComplete (/tmp/perf-339.map)
+	7f35a955a3e8 Lio/netty/channel/nio/AbstractNioByteChannel$NioByteUnsafe;.read (/tmp/perf-339.map)
+	7f35a973a20c Lio/netty/channel/nio/NioEventLoop;.processSelectedKeysOptimized (/tmp/perf-339.map)
+	7f35a91530b0 Lio/netty/channel/nio/NioEventLoop;.processSelectedKeys (/tmp/perf-339.map)
+	7f35a9007c4d Interpreter (/tmp/perf-339.map)
+	7f35a9007c4d Interpreter (/tmp/perf-339.map)
+	7f35a9007c92 Interpreter (/tmp/perf-339.map)
+	7f35a90007a7 call_stub (/tmp/perf-339.map)
+	7f35c01c2776 JavaCalls::call_helper(JavaValue*, methodHandle*, JavaCallArguments*, Thread*) (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c01c2c81 JavaCalls::call_virtual(JavaValue*, KlassHandle, Symbol*, Symbol*, JavaCallArguments*, Thread*) (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c01c3127 JavaCalls::call_virtual(JavaValue*, Handle, KlassHandle, Symbol*, Symbol*, Thread*) (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c0259e60 thread_entry(JavaThread*, Thread*) (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c059f9cf JavaThread::thread_main_inner() (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c059fafc JavaThread::run() (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c0453718 java_start(Thread*) (/usr/lib/jvm/jdk1.8.0_60/jre/lib/amd64/server/libjvm.so)
+	7f35c12f9182 start_thread (/lib/x86_64-linux-gnu/libpthread-2.19.so)
+						</code>
+					</pre>	
+				</section>			
+
+				<section>
+					<h3>Fichero de stacks</h3>
+					<p>Métodos separados por ;</p>
+					<pre style="box-shadow: 0px 0px;">
+						<code class="hljs php">
+	main;foo 1
+	main;foo;car 3
+	main;foo;abc 10
+	main;foo;abc;pof 4
+	main;bar;car 3
+	main;bar;abc 7
+	main;zas 15
+						</code>
+					</pre>
+				</section>
+				<section>
+					<h3>Fichero de stacks</h3>
+					<p>Los giramos &#8634;</p>
+					<pre style="box-shadow: 0px 0px;">
+						<code class="hljs php">
+				4
+		      3    10  pof   3    7
+		 1   car  abc  abc  car  abc   15
+		foo  foo  foo  foo  bar  bar  zas
+		main main main main main main main
+   					    </code>
+					</pre>
+				</section>
+				<section>
+					<h3>Fichero de stacks</h3>
+					<p>Lo ordenamos alfabéticamente</p>
+					<pre style="box-shadow: 0px 0px;">
+						<code class="hljs php">
+				       4
+		  7	3        10   pof   3
+ 	         abc   car   1   abc  abc  car  15
+		 bar   bar  foo  foo  foo  foo  zas
+		 main  main main main main main main
+							   </code>
+						</pre>
+				</section>
+				<section>
+					<h3>Interpretación</h3>
+					<object data="images/MinStackExplain.svg" type="image/svg+xml" style="max-width: 1015px;width: 1015px"></object>
+					<ul>
+						<li class="fragment">Anchura proporcional número de llamadas</li>
+						<li class="fragment">En horizontal ordenado alfabéticamente</li>
+						<li class="fragment">Parte superior "visible" es el consumo de CPU</li>
+						<li class="fragment">Colores aleatorios</li>
+					</ul>
+				</section>
+				<section>
+					<h3>¿Cómo generamos los Stacks?</h3>
+					<ul>
+						<li class="fragment">VisualVM</li>
+						<li class="fragment">YourKit, JProfiler, XRebel</li>
+						<li class="fragment">Java Mission Control</li>
+						<li class="fragment">Perf, Dtrace</li>
+					</ul>					
+				</section>
+				<section>
+					<h3>¿Qué distingue a un profiler de otro?</h3>
+					<p class="fragment">¡El mecanismo que use para hacer el sampleo!</p>
+					<ul>
+						<li class="fragment">Mediante el uso del API JVM Tool Interface</li>
+						<li class="fragment">Mediante el uso de AsyncGetCallTrace</li>
+						<li class="fragment">Mediante API profiling del Sistema Operativo</li>
+					</ul>					
+				</section>
+				<section>
+					<h3>API JVM Tool Interface</h3>
+					<p>API oficial de la JVM y válido para cualquier implementación "certificada".</p>
+					<ul>
+						<li class="fragment"><b>Safepoints</b> bias</li>
+						<li class="fragment">Puntos de control de la JVM donde puede parar un thread con seguridad</li>
+						<li class="fragment">Llamada JNI, al finalizar ciertos bucles, al salir de un método, cada 2 bytecodes en el intérprete.</li>
+						<li class="fragment">VisualVM, JStack, hprof</b></li>
+						
+					</ul>					
+				</section>
+				<section>
+					<h3>Safepoint Bias</h3>
+					<img src="images/SafePointPollStack.png" class="plain" style="max-width: 550px;"/>
+				</section>
+				<section>
+					<h3 style="text-transform: none;">AsyncGetCallTrace</h3>
+					<p>API interna de la JVM de Oracle</p>
+					<ul>
+						<li class="fragment">Específico de la JVM Oracle/OpenJDK</li>
+						<li class="fragment">No Safepoint bias</li>
+						<li class="fragment">Sampling bias</li>
+						<li class="fragment">Código nativo no controlado</li>
+						<li class="fragment">Flight Recorder (JMC), Honest-Profiler</b></li>
+					</ul>					
+				</section>
+				<section>
+					<h3 style="text-transform: none;">AsyncGetCallTrace</h3>
+					<img src="images/AsyncGetCallTrace.png" class="plain" style="max-width: 550px;"/>
+				</section>
+				<section>
+					<h3>Profiler Nativo</h3>
+					<p>¿Qué pasa con todo el código que no es java?</p>
+					<ul>
+						<li>Código própio de la JVM (Compiler, Runtime, GC)</li>
+						<li>Código nativo optimizado o intrinsics<br/>
+							<img src="images/NativeCodeCall.png" class="plain"/>
+						</li>
+						<li>Llamadas al sistema operativo (Threads, IO, etc)</li>
+						<li>Desde el SO tenemos mejor visión!</li>
+					</ul>
+				</section>
+				<section data-background-image="images/linux_observability_tools.png" data-background-size="900px" data-background="#ffffff" data-background-repeat="no-repeat" data-background-position="center"></section>
+				<section data-background-image="images/FileNameCounter.png" data-background-size="1200px" data-background="#ffffff" data-background-repeat="no-repeat" data-background-position="center">
+				</section>
+				<section>
+					<h3 style="text-transform: none;">Sampleo con AsyncGetCallTrace</h3>
+					<object data="images/FileNameCounter-Jfr.svg" type="image/svg+xml" style="max-width: 1015px;width: 1015px"></object>
+				</section>
+				<section>
+						<h3 style="text-transform: none;">Sampleo con Perf</h3>
+						<object data="images/FileNameCounter-Perf.svg" type="image/svg+xml" style="max-width: 1015px;width: 910px"></object>
+				</section>
+				<section>
+					<h3>¡Tenemos un problema de memoria!</h3>
+					<img src="images/UsoGC.png" class="plain"/>
+				</section>
+				<section>
+					<h3>¿Cómo lo hago?</h3>
+					<ul>
+						<li><strike>Con hprof</strike></li>
+						<li>Con Java Flight Recorder</li>
+						<li>Con Perf</li>
+					</ul>
+				</section>
+				<section>
+					<h3>En cualquiera de los casos</h3>
+					<h4>Flame Graph project</h4>
+					<p><span class="code-style">git clone git@github.com:brendangregg/FlameGraph.git</span></p>
+					<p><span class="code-style">export FLAMEGRAPH_DIR=/path/donde/clonaste/FlameGraph</span></p>
+				</section>
+				<section>
+					<h3>Java Flight Recorder</h3>
+					<p>Ejecuta tu código con monitorización</p>
+					<pre style="box-shadow: 0px 0px; background-color: black; padding: 18px; color: white;">
+						<codae  style="font-size: 78%;line-height: 2.4em;">
+java -<span class="hljs-type">XX</span>:+<span class="hljs-type">UnlockCommercialFeatures</span> -<span class="hljs-type">XX</span>:+<span class="hljs-type">FlightRecorder</span>  
+-<span class="hljs-type">XX</span>:+<span class="hljs-type">UnlockDiagnosticVMOptions</span> -<span class="hljs-type">XX</span>:+<span class="hljs-type">DebugNonSafepoints</span> 
+-<span class="hljs-type">XX</span>:<span class="hljs-type">StartFlightRecording</span>=delay=<span class="hljs-number">1</span>s,duration=<span class="hljs-number">90</span>s,filename=result.jfr,settings=profile  
+-jar yourApp.jar your_app_params</codae>
+					</pre>
+				</section>
+				<section>
+					<h3 style="text-transform: none;">jfr-flame-graph</h3>
+					<p><a href="https://github.com/chrishantha/jfr-flame-graph">https://github.com/chrishantha/jfr-flame-graph</a></p>
+					<ul>
+						<li>Extrae de ".jfr" toda la información de stacks y genera fichero en formato común</li>
+						<li>Depende de las librerías de JFR para parsear la información</li>
+						<li>Necesita localizarlas e instalarlas en tu maven local <br/> con <span class="code-style">install-mc-jars.sh</span> </li>
+						<li>Ejecuta: <br/><span class="code-style"> ./create_flamegraph.sh -f result.jfr -i > flamegraph.svg</span></li>
+					</ul>
+				</section>
+				<section data-background="#ffffff">
+					<h3>Proceso</h3>
+					<img src="images/jfr-flame-graph.png" class="plain"/>
+				</section>
+				<section>
+					<h3>Perf</h3>
+					<p class="fragment">¿Preparado?</p>
+					<p class="fragment">¿Seguro?</p>
+					<p class="fragment">¡¿Seguro?!</p>
+					<p class="fragment">¡¿SEGURO?!</p>
+				</section>							
+				<section>
+					<h3>Dos malas noticias</h3>
+					<ul>
+						<li>Perf no entiende de stacks de Java (Frame Pointers)</li>
+						<li>La JVM al compilar JIT no expone la tabla de símbolos</li>
+					</ul>
+					<img src="images/facepalm.jpg" class="plain" style="max-width: 50%;"/>
+				</section>							
+				<section>
+					<h3>Frame Pointers</h3>
+					<ul>
+						<li>Brendan se arremangó y hackeó la OpenJDK sin "mucha dificultad"</li>
+						<li>Hizo una PR y se la aceptaron</li>
+						<li>Disponible desde <b>JDK8 update 60 build 19 &#8679;</b></li>
+						<li>Se activar mediante <span class="code-style">-XX:+PreserveFramePointer</span></li>
+					</ul>
+				</section>
+				<section>
+					<h3>Tabla de símbolos</h3>
+					<ul>
+						<li><span class="code-style">Perf_events</span> no sabe qué nombres de métodos están referenciados, sólo códigos</li>
+						<li>Necesita soporte del JIT para que genere fichero <span class="code-style">/tmp/perf-PID.map</span></li>
+						<li>La JVM no lo genera, ni lo implementa como flag</li>
+						<li>Necesita de una herramienta externa</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Tabla de símbolos</h3>
+					<pre style="box-shadow: 0px 0px;">
+						<code class="hljs none" style="font-size: 65%;line-height: 1.4em;">
+java 22176  3385.271871:   22719600 cycles: 
+	a912a3 CollectedHeap::post_allocation_setup_array (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	a90bc9 TypeArrayKlass::allocate_common (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	6e4382 jni_NewByteArray (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	 1c0e8 JNU_NewStringPlatform (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/libjava.so)
+	 15d42 Java_java_io_UnixFileSystem_list (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/libjava.so)
+  7f0c891c54fc [unknown] (/tmp/perf-22170.map)
+  7f0c891d3364 [unknown] (/tmp/perf-22170.map)
+  7f0c891ea894 [unknown] (/tmp/perf-22170.map)
+  7f0c890082bd [unknown] (/tmp/perf-22170.map)
+  7f0c890007a7 [unknown] (/tmp/perf-22170.map)
+	693e76 JavaCalls::call_helper (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	6d5292 jni_invoke_static (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	6f1afa jni_CallStaticVoidMethod (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/server/libjvm.so)
+	  80ff JavaMain (/usr/lib/jvm/java-8-oracle/jre/lib/amd64/jli/libjli.so)
+	  76da start_thread (/lib/x86_64-linux-gnu/libpthread-2.24.so)						
+						</code>
+					</pre>
+				</section>
+				<section>
+					<h3 style="text-transform: none;">perf-map-agent</h3>
+					<p><a href="https://github.com/jvm-profiling-tools/perf-map-agent">https://github.com/jvm-profiling-tools/perf-map-agent</a></p>
+					<ul>
+						<li>Necesitas compilar código nativo (genera .so y .jar)</li>
+						<li>Es un agente de la JVM que se conecta a tu proceso en ejecución</li>
+						<li>Se ejecuta después de perf (no durante), para obtener mediante JVM TI los símbolos creados</li>
+					</ul>
+				</section>
+				<section>
+					<h3 style="text-transform: none;">perf-map-agent</h3>
+					<ul>
+						<li>Donde lo hayas compilado, con los ficheros <span class="code-style">libperfmap.so</span> y <span class="code-style">attach-main.jar</span>, ejecutas:<br/>
+							<span class="code-style">
+								java -cp attach-main.jar:$JAVA_HOME/lib/tools.jar net.virtualvoid.perf.AttachOnce $pid
+							</span>
+						</li>
+						<li>Se conecta a la JVM con el $pid en ejecución, y extrae la tabla de símbolos mediante JVM TI</li>
+						<li>Cambia a root el propietario del fichero<br/> 
+							<span class="code-style">
+								chown root /tmp/perf-*.map
+							</span>
+						</li>
+					</ul>
+				</section>	
+				<section>
+					<h3>Usando Perf</h3>
+					<p><span class="code-style">
+						sudo perf record -F 99 -a -g -p $pid -- sleep 90
+					</span></p>
+					<ul>
+						<li><span class="code-style">perf record</span> Grabar profile en <span class="code-style">perf.data</span></li>
+						<li><span class="code-style">-F</span> Frecuencia de muestreo</li>
+						<li><span class="code-style">-a</span> Examina todas las CPUs</li>
+						<li><span class="code-style">-g</span> Captura los stacks</li>
+						<li><span class="code-style">-p $pid</span> Pid del proceso</li> 
+						<li><span class="code-style">-- sleep</span> Tiempo de muestreo</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Pintando la gráfica</h3>
+					<p><span class="code-style">
+						perf script | $FLAMEGRAPH_DIR/stackcollapse-perf.pl | $FLAMEGRAPH_DIR/flamegraph.pl --color=java --hash <br/> > flamegraph.svg
+					</span></p>
+					<ul>
+						<li><span class="code-style">perf script</span> lee los datos del fichero <span class="code-style">perf.data</span></li>
+						<li><span class="code-style">stackcollapse-perf.pl</span> filtra, agrupa y colapsa stacks</li>
+						<li><span class="code-style">flamegraph.pl</span> Genera el Flame Graph</li>
+						<li><span class="code-style">--color=java</span> esquema de color a usar</li>
+						<li><span class="code-style">--hash</span> color en función del hash del nombre</li>
+					</ul>
+				</section>
+				<section>
+					<h3>Otros parámetros</h3>
+					<ul>
+						<li><span class="code-style">--title</span> título del gráfico</li>
+						<li><span class="code-style">--width</span> anchura</li>
+						<li><span class="code-style">--height</span> altura</li>
+						<li><span class="code-style">--minwidth</span> omitir funciones pequeñas</li>
+						<li><span class="code-style">--reverse --inverted</span> Invertir el stack</li>
+					</ul>
+				</section>
+				<section data-background="#ffffff">
+					<h3>Proceso</h3>
+					<img src="images/perf-flame-graph-pipeline.png" class="plain"/>
+				</section>
+				<section>
+					<h3>Ejemplos</h3>
+					<ul>
+						<li>
+							<a href="images/MegaFlameGraph.png" target="_blank">Cuidado con la complejidad del código</a>
+						</li>
+						<li>
+							<a href="images/MeDejoLoco.png" target="_blank">Cuidado.... WTF!</a>
+						</li>			
+						<li>
+							<a href="images/SampleQuijoteMapSiTrace.svg" target="_blank">Cuidado con las trazas</a>
+						</li>
+						<!--li>
+							<a href="images/SampleQuijoteMapNoTrace.svg" target="_blank">Cuidado con las estructuras de datos</a>
+						</li-->
+						<li>
+							<a href="images/JFleet-DateFormat.svg" target="_blank">Cuidado con el parseo de datos</a>
+						</li>
+						<li>
+							<a href="images/JFleet-DateFormat.svg" target="_blank">Cuidado con los bloqueos IO</a>
+						</li>
+					</ul>
+				</section>
+				<section>
+					<h1>Q & A</h3>
+					<h3>¡Muchas gracias!</h3>
+				</section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.js"></script>
+
+		<script>
+			// More info about config & dependencies:
+			// - https://github.com/hakimel/reveal.js#configuration
+			// - https://github.com/hakimel/reveal.js#dependencies
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				transition: 'slide', // none/fade/slide/convex/concave/zoom
+
+				dependencies: [
+					{ src: 'plugin/markdown/marked.js' },
+					{ src: 'plugin/markdown/markdown.js' },
+					{ src: 'plugin/notes/notes.js', async: true },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } }
+				]
+			});
+		</script>
+
+		<script src="asciinema/asciinema-player.js"></script>
+	</body>
+</html>

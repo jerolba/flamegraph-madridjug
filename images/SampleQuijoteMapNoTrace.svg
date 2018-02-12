@@ -1,0 +1,1898 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="800" height="390" onload="init(evt)" viewBox="0 0 800 390" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs >
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	var details, searchbtn, matchedtxt, svg;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	// mouse-over for info
+	function s(node) {		// show
+		info = g_to_text(node);
+		details.nodeValue = "Function: " + info;
+	}
+	function c() {			// clear
+		details.nodeValue = ' ';
+	}
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	})
+
+	// functions
+	function find_child(parent, name, attr) {
+		var children = parent.childNodes;
+		for (var i=0; i<children.length;i++) {
+			if (children[i].tagName == name)
+				return (attr != undefined) ? children[i].attributes[attr].value : children[i];
+		}
+		return;
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_"+attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_"+attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_"+attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes["width"].value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes["x"].value = parseFloat(r.attributes["x"].value) +3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2*12*0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x=txt.length-2; x>0; x--) {
+			if (t.getSubStringLength(0, x+2) <= w) {
+				t.textContent = txt.substring(0,x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = (parseFloat(e.attributes["x"].value) - x - 10) * ratio + 10;
+				if(e.tagName == "text") e.attributes["x"].value = find_child(e.parentNode, "rect", "x") + 3;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseFloat(e.attributes["width"].value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_child(c[i], x-10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = 10;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseInt(svg.width.baseVal.value) - (10*2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr["width"].value);
+		var xmin = parseFloat(attr["x"].value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr["y"].value);
+		var ratio = (svg.width.baseVal.value - 2*10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "1.0";
+
+		var el = document.getElementsByTagName("g");
+		for(var i=0;i<el.length;i++){
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a["x"].value);
+			var ew = parseFloat(a["width"].value);
+			// Is it an ancestor
+			if (0 == 0) {
+				var upstack = parseFloat(a["y"].value) > ymin;
+			} else {
+				var upstack = parseFloat(a["y"].value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.style["opacity"] = "0.5";
+					zoom_parent(e);
+					e.onclick = function(e){unzoom(); zoom(this);};
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.style["display"] = "none";
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.style["display"] = "none";
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					e.onclick = function(e){zoom(this);};
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "0.0";
+
+		var el = document.getElementsByTagName("g");
+		for(i=0;i<el.length;i++) {
+			el[i].style["display"] = "block";
+			el[i].style["opacity"] = "1";
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.style["opacity"] = "0.1";
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.style["opacity"] = "0.0";
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementsByTagName("g");
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			if (e.attributes["class"].value != "func_g")
+				continue;
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (rect == null) {
+				// the rect might be wrapped in an anchor
+				// if nameattr href is being used
+				if (rect = find_child(e, "a")) {
+				    rect = find_child(r, "rect");
+				}
+			}
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes["width"].value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes["x"].value);
+				orig_save(rect, "fill");
+				rect.attributes["fill"].value =
+				    "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.style["opacity"] = "1.0";
+		searchbtn.firstChild.nodeValue = "Reset Search"
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.style["opacity"] = "1.0";
+		pct = 100 * count / maxwidth;
+		if (pct == 100)
+			pct = "100"
+		else
+			pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+	function searchover(e) {
+		searchbtn.style["opacity"] = "1.0";
+	}
+	function searchout(e) {
+		if (searching) {
+			searchbtn.style["opacity"] = "1.0";
+		} else {
+			searchbtn.style["opacity"] = "0.1";
+		}
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="800.0" height="390.0" fill="url(#background)"  />
+<text text-anchor="middle" x="400.00" y="24" font-size="17" font-family="Verdana" fill="rgb(0,0,0)"  >Ejemplo Flame Graph</text>
+<text text-anchor="" x="10.00" y="373" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="details" > </text>
+<text text-anchor="" x="10.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer" >Reset Zoom</text>
+<text text-anchor="" x="690.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer" >Search</text>
+<text text-anchor="" x="690.00" y="373" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="matched" > </text>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.removeSpecialChars(java.lang.String) (11 samples, 0.28%)</title><rect x="618.3" y="149" width="2.2" height="15.0" fill="rgb(233,164,26)" rx="2" ry="2" />
+<text text-anchor="" x="621.32" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (1 samples, 0.03%)</title><rect x="688.1" y="101" width="0.2" height="15.0" fill="rgb(253,118,51)" rx="2" ry="2" />
+<text text-anchor="" x="691.11" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (33 samples, 0.85%)</title><rect x="532.1" y="197" width="6.6" height="15.0" fill="rgb(208,220,50)" rx="2" ry="2" />
+<text text-anchor="" x="535.07" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.misc.URLClassPath.findResource(java.lang.String, boolean) (1 samples, 0.03%)</title><rect x="729.4" y="197" width="0.2" height="15.0" fill="rgb(231,126,53)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (10 samples, 0.26%)</title><rect x="586.8" y="149" width="2.0" height="15.0" fill="rgb(213,161,40)" rx="2" ry="2" />
+<text text-anchor="" x="589.83" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamOpFlag.fromCharacteristics(java.util.Spliterator) (3 samples, 0.08%)</title><rect x="224.0" y="245" width="0.6" height="15.0" fill="rgb(224,212,6)" rx="2" ry="2" />
+<text text-anchor="" x="227.00" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.newNode(int, java.lang.Object, java.lang.Object, java.util.HashMap$Node) (7 samples, 0.18%)</title><rect x="174.9" y="245" width="1.4" height="15.0" fill="rgb(249,25,14)" rx="2" ry="2" />
+<text text-anchor="" x="177.87" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList$1.&lt;init&gt;(java.util.ArrayList$SubList, int, int) (1 samples, 0.03%)</title><rect x="507.4" y="181" width="0.2" height="15.0" fill="rgb(243,123,54)" rx="2" ry="2" />
+<text text-anchor="" x="510.40" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.&lt;init&gt;(java.util.stream.AbstractPipeline, int) (4 samples, 0.10%)</title><rect x="709.6" y="213" width="0.8" height="15.0" fill="rgb(226,210,42)" rx="2" ry="2" />
+<text text-anchor="" x="712.57" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.LinkedList.contains(java.lang.Object) (602 samples, 15.48%)</title><rect x="324.5" y="133" width="120.7" height="15.0" fill="rgb(243,127,4)" rx="2" ry="2" />
+<text text-anchor="" x="327.49" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.Linke..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3$1.&lt;init&gt;(java.util.stream.ReferencePipeline$3, java.util.stream.Sink) (1 samples, 0.03%)</title><rect x="706.0" y="181" width="0.2" height="15.0" fill="rgb(209,211,16)" rx="2" ry="2" />
+<text text-anchor="" x="708.96" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="602.7" y="213" width="0.4" height="15.0" fill="rgb(211,24,49)" rx="2" ry="2" />
+<text text-anchor="" x="605.67" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Spliterators$ArraySpliterator.&lt;init&gt;(java.lang.Object[], int) (1 samples, 0.03%)</title><rect x="223.2" y="229" width="0.2" height="15.0" fill="rgb(222,42,30)" rx="2" ry="2" />
+<text text-anchor="" x="226.20" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.Buffer.discardMark() (1 samples, 0.03%)</title><rect x="788.0" y="117" width="0.2" height="15.0" fill="rgb(222,23,38)" rx="2" ry="2" />
+<text text-anchor="" x="790.99" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList.&lt;init&gt;() (3 samples, 0.08%)</title><rect x="459.7" y="149" width="0.6" height="15.0" fill="rgb(232,167,11)" rx="2" ry="2" />
+<text text-anchor="" x="462.67" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URLClassLoader$2.run() (1 samples, 0.03%)</title><rect x="729.4" y="229" width="0.2" height="15.0" fill="rgb(213,19,35)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.filterAndLog_0_Or3Plus(java.lang.String, org.slf4j.Marker, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (3 samples, 0.08%)</title><rect x="569.2" y="261" width="0.6" height="15.0" fill="rgb(244,70,18)" rx="2" ry="2" />
+<text text-anchor="" x="572.18" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.add(java.lang.Object) (59 samples, 1.52%)</title><rect x="447.2" y="149" width="11.9" height="15.0" fill="rgb(248,114,24)" rx="2" ry="2" />
+<text text-anchor="" x="450.23" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.hash(java.lang.Object) (69 samples, 1.77%)</title><rect x="143.0" y="261" width="13.8" height="15.0" fill="rgb(232,140,32)" rx="2" ry="2" />
+<text text-anchor="" x="145.98" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (4 samples, 0.10%)</title><rect x="718.6" y="261" width="0.8" height="15.0" fill="rgb(232,94,54)" rx="2" ry="2" />
+<text text-anchor="" x="721.60" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URL.&lt;init&gt;(java.net.URL, java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="133" width="0.2" height="15.0" fill="rgb(238,41,49)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(java.lang.Object[], int) (18 samples, 0.46%)</title><rect x="519.4" y="181" width="3.6" height="15.0" fill="rgb(209,32,10)" rx="2" ry="2" />
+<text text-anchor="" x="522.44" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (8 samples, 0.21%)</title><rect x="524.5" y="261" width="1.6" height="15.0" fill="rgb(216,177,12)" rx="2" ry="2" />
+<text text-anchor="" x="527.45" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (3 samples, 0.08%)</title><rect x="718.0" y="261" width="0.6" height="15.0" fill="rgb(206,117,20)" rx="2" ry="2" />
+<text text-anchor="" x="721.00" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedWriter.write(java.lang.String, int, int) (19 samples, 0.49%)</title><rect x="714.2" y="261" width="3.8" height="15.0" fill="rgb(227,81,22)" rx="2" ry="2" />
+<text text-anchor="" x="717.19" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList$1.next() (5 samples, 0.13%)</title><rect x="506.4" y="229" width="1.0" height="15.0" fill="rgb(254,207,38)" rx="2" ry="2" />
+<text text-anchor="" x="509.40" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.length() (13 samples, 0.33%)</title><rect x="321.9" y="133" width="2.6" height="15.0" fill="rgb(208,36,6)" rx="2" ry="2" />
+<text text-anchor="" x="324.88" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.ClassLoader.getResource(java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="277" width="0.2" height="15.0" fill="rgb(229,20,16)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (2 samples, 0.05%)</title><rect x="538.7" y="213" width="0.4" height="15.0" fill="rgb(219,52,50)" rx="2" ry="2" />
+<text text-anchor="" x="541.69" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="602.7" y="229" width="0.4" height="15.0" fill="rgb(210,161,52)" rx="2" ry="2" />
+<text text-anchor="" x="605.67" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3$1.&lt;init&gt;(java.util.stream.ReferencePipeline$3, java.util.stream.Sink) (2 samples, 0.05%)</title><rect x="461.7" y="181" width="0.4" height="15.0" fill="rgb(238,88,43)" rx="2" ry="2" />
+<text text-anchor="" x="464.67" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (10 samples, 0.26%)</title><rect x="597.1" y="229" width="2.0" height="15.0" fill="rgb(219,96,27)" rx="2" ry="2" />
+<text text-anchor="" x="600.06" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.makeSink() (5 samples, 0.13%)</title><rect x="462.1" y="213" width="1.0" height="15.0" fill="rgb(218,58,51)" rx="2" ry="2" />
+<text text-anchor="" x="465.08" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.putVal(int, java.lang.Object, java.lang.Object, boolean, boolean) (107 samples, 2.75%)</title><rect x="159.0" y="261" width="21.5" height="15.0" fill="rgb(222,111,1)" rx="2" ry="2" />
+<text text-anchor="" x="162.02" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >j..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays$ArrayList.size() (5 samples, 0.13%)</title><rect x="556.1" y="213" width="1.0" height="15.0" fill="rgb(219,151,2)" rx="2" ry="2" />
+<text text-anchor="" x="559.14" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.makeSink() (3 samples, 0.08%)</title><rect x="706.2" y="213" width="0.6" height="15.0" fill="rgb(226,72,28)" rx="2" ry="2" />
+<text text-anchor="" x="709.16" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (8 samples, 0.21%)</title><rect x="218.2" y="213" width="1.6" height="15.0" fill="rgb(238,99,17)" rx="2" ry="2" />
+<text text-anchor="" x="221.19" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.end() (2 samples, 0.05%)</title><rect x="460.3" y="197" width="0.4" height="15.0" fill="rgb(225,132,26)" rx="2" ry="2" />
+<text text-anchor="" x="463.27" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (57 samples, 1.47%)</title><rect x="200.7" y="213" width="11.5" height="15.0" fill="rgb(236,133,45)" rx="2" ry="2" />
+<text text-anchor="" x="203.74" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Spliterators$ArraySpliterator.forEachRemaining(java.util.function.Consumer) (1,151 samples, 29.60%)</title><rect x="228.2" y="197" width="230.9" height="15.0" fill="rgb(236,49,1)" rx="2" ry="2" />
+<text text-anchor="" x="231.22" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.Spliterators$ArraySp..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (3 samples, 0.08%)</title><rect x="565.0" y="277" width="0.6" height="15.0" fill="rgb(223,46,6)" rx="2" ry="2" />
+<text text-anchor="" x="567.97" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (6 samples, 0.15%)</title><rect x="565.6" y="261" width="1.2" height="15.0" fill="rgb(226,108,46)" rx="2" ry="2" />
+<text text-anchor="" x="568.57" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$Head.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="602.7" y="245" width="0.4" height="15.0" fill="rgb(236,196,31)" rx="2" ry="2" />
+<text text-anchor="" x="605.67" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.charset.CharsetDecoder.decode(java.nio.ByteBuffer, java.nio.CharBuffer, boolean) (202 samples, 5.19%)</title><rect x="746.9" y="149" width="40.5" height="15.0" fill="rgb(238,58,29)" rx="2" ry="2" />
+<text text-anchor="" x="749.88" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >jav..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (1 samples, 0.03%)</title><rect x="719.4" y="197" width="0.2" height="15.0" fill="rgb(218,134,6)" rx="2" ry="2" />
+<text text-anchor="" x="722.40" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.checkForComodification() (4 samples, 0.10%)</title><rect x="215.8" y="213" width="0.8" height="15.0" fill="rgb(231,97,54)" rx="2" ry="2" />
+<text text-anchor="" x="218.78" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedWriter.flushBuffer() (13 samples, 0.33%)</title><rect x="715.4" y="245" width="2.6" height="15.0" fill="rgb(216,169,37)" rx="2" ry="2" />
+<text text-anchor="" x="718.39" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.begin(long) (6 samples, 0.15%)</title><rect x="459.1" y="197" width="1.2" height="15.0" fill="rgb(223,148,2)" rx="2" ry="2" />
+<text text-anchor="" x="462.07" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.writeToFile(java.util.Map) (94 samples, 2.42%)</title><rect x="710.4" y="293" width="18.8" height="15.0" fill="rgb(227,200,0)" rx="2" ry="2" />
+<text text-anchor="" x="713.38" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamEncoder.implWrite(char[], int, int) (11 samples, 0.28%)</title><rect x="715.8" y="197" width="2.2" height="15.0" fill="rgb(212,229,43)" rx="2" ry="2" />
+<text text-anchor="" x="718.79" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (4 samples, 0.10%)</title><rect x="570.2" y="261" width="0.8" height="15.0" fill="rgb(252,5,1)" rx="2" ry="2" />
+<text text-anchor="" x="573.18" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$ReduceOp.evaluateSequential(java.util.stream.PipelineHelper, java.util.Spliterator) (1,175 samples, 30.21%)</title><rect x="227.4" y="245" width="235.7" height="15.0" fill="rgb(228,23,43)" rx="2" ry="2" />
+<text text-anchor="" x="230.41" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.ReduceOps$Redu..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.read(char[], int, int) (207 samples, 5.32%)</title><rect x="746.7" y="181" width="41.5" height="15.0" fill="rgb(230,12,43)" rx="2" ry="2" />
+<text text-anchor="" x="749.68" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >sun..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Character.valueOf(char) (23 samples, 0.59%)</title><rect x="309.6" y="133" width="4.7" height="15.0" fill="rgb(251,150,46)" rx="2" ry="2" />
+<text text-anchor="" x="312.65" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Integer.toString(int) (4 samples, 0.10%)</title><rect x="718.6" y="229" width="0.8" height="15.0" fill="rgb(209,73,28)" rx="2" ry="2" />
+<text text-anchor="" x="721.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.concurrent.CopyOnWriteArrayList.size() (1 samples, 0.03%)</title><rect x="569.6" y="229" width="0.2" height="15.0" fill="rgb(207,145,10)" rx="2" ry="2" />
+<text text-anchor="" x="572.58" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (1 samples, 0.03%)</title><rect x="719.4" y="213" width="0.2" height="15.0" fill="rgb(244,151,33)" rx="2" ry="2" />
+<text text-anchor="" x="722.40" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps.makeRef(java.util.stream.Collector) (5 samples, 0.13%)</title><rect x="707.0" y="261" width="1.0" height="15.0" fill="rgb(219,53,26)" rx="2" ry="2" />
+<text text-anchor="" x="709.97" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="223.6" y="213" width="0.4" height="15.0" fill="rgb(218,85,42)" rx="2" ry="2" />
+<text text-anchor="" x="226.60" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.evaluate(java.util.stream.TerminalOp) (505 samples, 12.99%)</title><rect x="605.5" y="261" width="101.3" height="15.0" fill="rgb(254,27,13)" rx="2" ry="2" />
+<text text-anchor="" x="608.48" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.st..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (3 samples, 0.08%)</title><rect x="719.6" y="229" width="0.6" height="15.0" fill="rgb(219,10,8)" rx="2" ry="2" />
+<text text-anchor="" x="722.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamOpFlag.isKnown(int) (1 samples, 0.03%)</title><rect x="704.0" y="197" width="0.2" height="15.0" fill="rgb(215,213,21)" rx="2" ry="2" />
+<text text-anchor="" x="706.96" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.characteristics() (1 samples, 0.03%)</title><rect x="706.8" y="261" width="0.2" height="15.0" fill="rgb(226,85,30)" rx="2" ry="2" />
+<text text-anchor="" x="709.77" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.wrapAndCopyInto(java.util.stream.Sink, java.util.Spliterator) (500 samples, 12.86%)</title><rect x="605.9" y="229" width="100.3" height="15.0" fill="rgb(253,120,19)" rx="2" ry="2" />
+<text text-anchor="" x="608.88" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.st..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays$ArrayList.get(int) (2 samples, 0.05%)</title><rect x="559.1" y="213" width="0.5" height="15.0" fill="rgb(219,50,8)" rx="2" ry="2" />
+<text text-anchor="" x="562.15" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.&lt;init&gt;(java.io.InputStream, java.lang.Object, java.nio.charset.CharsetDecoder) (1 samples, 0.03%)</title><rect x="729.2" y="245" width="0.2" height="15.0" fill="rgb(248,30,5)" rx="2" ry="2" />
+<text text-anchor="" x="732.23" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (2 samples, 0.05%)</title><rect x="564.6" y="229" width="0.4" height="15.0" fill="rgb(215,121,5)" rx="2" ry="2" />
+<text text-anchor="" x="567.56" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.charAt(int) (32 samples, 0.82%)</title><rect x="680.1" y="133" width="6.4" height="15.0" fill="rgb(212,84,46)" rx="2" ry="2" />
+<text text-anchor="" x="683.09" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Collection.stream() (10 samples, 0.26%)</title><rect x="222.6" y="277" width="2.0" height="15.0" fill="rgb(245,9,7)" rx="2" ry="2" />
+<text text-anchor="" x="225.60" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.toString() (172 samples, 4.42%)</title><rect x="526.1" y="245" width="34.5" height="15.0" fill="rgb(212,195,50)" rx="2" ry="2" />
+<text text-anchor="" x="529.06" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (22 samples, 0.57%)</title><rect x="560.6" y="261" width="4.4" height="15.0" fill="rgb(226,126,20)" rx="2" ry="2" />
+<text text-anchor="" x="563.55" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3ReducingSink.begin(long) (2 samples, 0.05%)</title><rect x="703.4" y="181" width="0.4" height="15.0" fill="rgb(250,41,2)" rx="2" ry="2" />
+<text text-anchor="" x="706.36" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (2 samples, 0.05%)</title><rect x="220.6" y="229" width="0.4" height="15.0" fill="rgb(254,160,29)" rx="2" ry="2" />
+<text text-anchor="" x="223.59" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.Buffer.position(int) (1 samples, 0.03%)</title><rect x="784.8" y="53" width="0.2" height="15.0" fill="rgb(223,58,37)" rx="2" ry="2" />
+<text text-anchor="" x="787.79" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (6 samples, 0.15%)</title><rect x="565.6" y="277" width="1.2" height="15.0" fill="rgb(247,128,40)" rx="2" ry="2" />
+<text text-anchor="" x="568.57" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(char) (1 samples, 0.03%)</title><rect x="688.1" y="117" width="0.2" height="15.0" fill="rgb(206,183,46)" rx="2" ry="2" />
+<text text-anchor="" x="691.11" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (2 samples, 0.05%)</title><rect x="200.3" y="213" width="0.4" height="15.0" fill="rgb(241,83,30)" rx="2" ry="2" />
+<text text-anchor="" x="203.34" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.begin(long) (2 samples, 0.05%)</title><rect x="703.4" y="197" width="0.4" height="15.0" fill="rgb(234,5,53)" rx="2" ry="2" />
+<text text-anchor="" x="706.36" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (4 samples, 0.10%)</title><rect x="220.4" y="277" width="0.8" height="15.0" fill="rgb(246,55,54)" rx="2" ry="2" />
+<text text-anchor="" x="223.39" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.makeSink() (5 samples, 0.13%)</title><rect x="462.1" y="229" width="1.0" height="15.0" fill="rgb(227,53,48)" rx="2" ry="2" />
+<text text-anchor="" x="465.08" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (10 samples, 0.26%)</title><rect x="184.7" y="261" width="2.0" height="15.0" fill="rgb(227,91,51)" rx="2" ry="2" />
+<text text-anchor="" x="187.69" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (26 samples, 0.67%)</title><rect x="583.6" y="181" width="5.2" height="15.0" fill="rgb(243,131,18)" rx="2" ry="2" />
+<text text-anchor="" x="586.62" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.hash(java.lang.Object) (11 samples, 0.28%)</title><rect x="156.8" y="261" width="2.2" height="15.0" fill="rgb(246,95,53)" rx="2" ry="2" />
+<text text-anchor="" x="159.81" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URLClassLoader.getResourceAsStream(java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="293" width="0.2" height="15.0" fill="rgb(245,47,16)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (67 samples, 1.72%)</title><rect x="539.3" y="197" width="13.4" height="15.0" fill="rgb(251,78,18)" rx="2" ry="2" />
+<text text-anchor="" x="542.29" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureCapacityInternal(int) (38 samples, 0.98%)</title><rect x="695.7" y="133" width="7.7" height="15.0" fill="rgb(241,195,23)" rx="2" ry="2" />
+<text text-anchor="" x="698.73" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList.iterator() (5 samples, 0.13%)</title><rect x="559.6" y="229" width="1.0" height="15.0" fill="rgb(234,104,26)" rx="2" ry="2" />
+<text text-anchor="" x="562.55" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (70 samples, 1.80%)</title><rect x="538.7" y="229" width="14.0" height="15.0" fill="rgb(220,212,27)" rx="2" ry="2" />
+<text text-anchor="" x="541.69" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Collections$UnmodifiableCollection.contains(java.lang.Object) (1 samples, 0.03%)</title><rect x="605.5" y="229" width="0.2" height="15.0" fill="rgb(232,224,43)" rx="2" ry="2" />
+<text text-anchor="" x="608.48" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureCapacityInternal(int) (46 samples, 1.18%)</title><rect x="449.8" y="133" width="9.3" height="15.0" fill="rgb(222,227,14)" rx="2" ry="2" />
+<text text-anchor="" x="452.84" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (172 samples, 4.42%)</title><rect x="526.1" y="261" width="34.5" height="15.0" fill="rgb(233,66,0)" rx="2" ry="2" />
+<text text-anchor="" x="529.06" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (3 samples, 0.08%)</title><rect x="565.0" y="261" width="0.6" height="15.0" fill="rgb(226,55,47)" rx="2" ry="2" />
+<text text-anchor="" x="567.97" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (2 samples, 0.05%)</title><rect x="553.1" y="197" width="0.4" height="15.0" fill="rgb(212,47,19)" rx="2" ry="2" />
+<text text-anchor="" x="556.13" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (126 samples, 3.24%)</title><rect x="571.0" y="261" width="25.3" height="15.0" fill="rgb(245,91,43)" rx="2" ry="2" />
+<text text-anchor="" x="573.98" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >j..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.lambda$removeSpecialChars$1(java.lang.String) (1,019 samples, 26.20%)</title><rect x="240.9" y="165" width="204.3" height="15.0" fill="rgb(250,199,47)" rx="2" ry="2" />
+<text text-anchor="" x="243.85" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotion.ElQ..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URL.&lt;init&gt;(java.net.URL, java.lang.String, java.net.URLStreamHandler) (1 samples, 0.03%)</title><rect x="729.4" y="117" width="0.2" height="15.0" fill="rgb(247,129,31)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.addWord(java.lang.String) (827 samples, 21.27%)</title><rect x="14.6" y="293" width="165.9" height="15.0" fill="rgb(232,19,25)" rx="2" ry="2" />
+<text text-anchor="" x="17.61" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotio..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.charset.CharsetEncoder.encode(java.nio.CharBuffer, java.nio.ByteBuffer, boolean) (11 samples, 0.28%)</title><rect x="715.8" y="181" width="2.2" height="15.0" fill="rgb(240,177,53)" rx="2" ry="2" />
+<text text-anchor="" x="718.79" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Integer.getChars(int, int, char[]) (2 samples, 0.05%)</title><rect x="719.0" y="213" width="0.4" height="15.0" fill="rgb(253,185,38)" rx="2" ry="2" />
+<text text-anchor="" x="722.00" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.misc.URLClassPath$JarLoader.findResource(java.lang.String, boolean) (1 samples, 0.03%)</title><rect x="729.4" y="181" width="0.2" height="15.0" fill="rgb(218,82,31)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (68 samples, 1.75%)</title><rect x="539.1" y="213" width="13.6" height="15.0" fill="rgb(214,200,7)" rx="2" ry="2" />
+<text text-anchor="" x="542.09" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URLClassLoader.findResource(java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="261" width="0.2" height="15.0" fill="rgb(238,188,15)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.&lt;init&gt;(java.util.function.Supplier, java.util.function.BiConsumer, java.util.function.BinaryOperator, java.util.function.Function, java.util.Set) (1 samples, 0.03%)</title><rect x="605.3" y="245" width="0.2" height="15.0" fill="rgb(222,102,3)" rx="2" ry="2" />
+<text text-anchor="" x="608.28" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Character.equals(java.lang.Object) (307 samples, 7.89%)</title><rect x="383.7" y="101" width="61.5" height="15.0" fill="rgb(222,71,29)" rx="2" ry="2" />
+<text text-anchor="" x="386.65" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList.size() (3 samples, 0.08%)</title><rect x="507.6" y="229" width="0.6" height="15.0" fill="rgb(238,24,28)" rx="2" ry="2" />
+<text text-anchor="" x="510.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList.listIterator(int) (1 samples, 0.03%)</title><rect x="507.4" y="197" width="0.2" height="15.0" fill="rgb(247,69,27)" rx="2" ry="2" />
+<text text-anchor="" x="510.40" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Collections$UnmodifiableCollection.contains(java.lang.Object) (2 samples, 0.05%)</title><rect x="227.0" y="229" width="0.4" height="15.0" fill="rgb(223,147,36)" rx="2" ry="2" />
+<text text-anchor="" x="230.01" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (3 samples, 0.08%)</title><rect x="530.3" y="213" width="0.6" height="15.0" fill="rgb(231,163,0)" rx="2" ry="2" />
+<text text-anchor="" x="533.27" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.net.www.protocol.jar.Handler.parseURL(java.net.URL, java.lang.String, int, int) (1 samples, 0.03%)</title><rect x="729.4" y="101" width="0.2" height="15.0" fill="rgb(227,144,15)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (4 samples, 0.10%)</title><rect x="599.5" y="261" width="0.8" height="15.0" fill="rgb(245,38,52)" rx="2" ry="2" />
+<text text-anchor="" x="602.46" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap$EntryIterator.next() (32 samples, 0.82%)</title><rect x="722.6" y="277" width="6.4" height="15.0" fill="rgb(234,178,25)" rx="2" ry="2" />
+<text text-anchor="" x="725.61" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.&lt;init&gt;() (1 samples, 0.03%)</title><rect x="703.6" y="165" width="0.2" height="15.0" fill="rgb(228,83,53)" rx="2" ry="2" />
+<text text-anchor="" x="706.56" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.zip.InflaterInputStream.ensureOpen() (1 samples, 0.03%)</title><rect x="787.8" y="101" width="0.2" height="15.0" fill="rgb(226,202,50)" rx="2" ry="2" />
+<text text-anchor="" x="790.79" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (57 samples, 1.47%)</title><rect x="200.7" y="197" width="11.5" height="15.0" fill="rgb(210,11,43)" rx="2" ry="2" />
+<text text-anchor="" x="203.74" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (5 samples, 0.13%)</title><rect x="719.4" y="261" width="1.0" height="15.0" fill="rgb(205,67,25)" rx="2" ry="2" />
+<text text-anchor="" x="722.40" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Integer.toString() (4 samples, 0.10%)</title><rect x="718.6" y="245" width="0.8" height="15.0" fill="rgb(240,130,6)" rx="2" ry="2" />
+<text text-anchor="" x="721.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors.toList() (4 samples, 0.10%)</title><rect x="604.7" y="277" width="0.8" height="15.0" fill="rgb(230,116,34)" rx="2" ry="2" />
+<text text-anchor="" x="607.68" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (15 samples, 0.39%)</title><rect x="206.4" y="149" width="3.0" height="15.0" fill="rgb(220,151,6)" rx="2" ry="2" />
+<text text-anchor="" x="209.35" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.hasNext() (2 samples, 0.05%)</title><rect x="729.6" y="293" width="0.4" height="15.0" fill="rgb(243,38,54)" rx="2" ry="2" />
+<text text-anchor="" x="732.63" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (21 samples, 0.54%)</title><rect x="545.9" y="165" width="4.2" height="15.0" fill="rgb(219,221,45)" rx="2" ry="2" />
+<text text-anchor="" x="548.91" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (7 samples, 0.18%)</title><rect x="221.2" y="277" width="1.4" height="15.0" fill="rgb(236,132,26)" rx="2" ry="2" />
+<text text-anchor="" x="224.20" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.lambda$removeSpecialChars$1(java.lang.String) (11 samples, 0.28%)</title><rect x="618.3" y="165" width="2.2" height="15.0" fill="rgb(237,30,12)" rx="2" ry="2" />
+<text text-anchor="" x="621.32" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (4 samples, 0.10%)</title><rect x="213.2" y="213" width="0.8" height="15.0" fill="rgb(222,128,27)" rx="2" ry="2" />
+<text text-anchor="" x="216.17" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(char) (42 samples, 1.08%)</title><rect x="191.9" y="229" width="8.4" height="15.0" fill="rgb(246,129,9)" rx="2" ry="2" />
+<text text-anchor="" x="194.91" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (7 samples, 0.18%)</title><rect x="579.8" y="181" width="1.4" height="15.0" fill="rgb(242,52,11)" rx="2" ry="2" />
+<text text-anchor="" x="582.81" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader.readLine() (254 samples, 6.53%)</title><rect x="738.3" y="245" width="50.9" height="15.0" fill="rgb(219,15,33)" rx="2" ry="2" />
+<text text-anchor="" x="741.25" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (9 samples, 0.23%)</title><rect x="212.2" y="229" width="1.8" height="15.0" fill="rgb(232,56,1)" rx="2" ry="2" />
+<text text-anchor="" x="215.17" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(char) (29 samples, 0.75%)</title><rect x="575.4" y="213" width="5.8" height="15.0" fill="rgb(218,179,0)" rx="2" ry="2" />
+<text text-anchor="" x="578.39" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.getOpFlags() (1 samples, 0.03%)</title><rect x="605.5" y="245" width="0.2" height="15.0" fill="rgb(223,100,53)" rx="2" ry="2" />
+<text text-anchor="" x="608.48" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.grow(int) (21 samples, 0.54%)</title><rect x="699.1" y="101" width="4.3" height="15.0" fill="rgb(236,130,48)" rx="2" ry="2" />
+<text text-anchor="" x="702.14" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList$Itr.hasNext() (18 samples, 0.46%)</title><rect x="553.5" y="229" width="3.6" height="15.0" fill="rgb(246,46,27)" rx="2" ry="2" />
+<text text-anchor="" x="556.53" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$StatelessOp.&lt;init&gt;(java.util.stream.AbstractPipeline, java.util.stream.StreamShape, int) (4 samples, 0.10%)</title><rect x="709.6" y="245" width="0.8" height="15.0" fill="rgb(243,74,21)" rx="2" ry="2" />
+<text text-anchor="" x="712.57" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8$Decoder.decodeArrayLoop(java.nio.ByteBuffer, java.nio.CharBuffer) (202 samples, 5.19%)</title><rect x="746.9" y="117" width="40.5" height="15.0" fill="rgb(207,177,22)" rx="2" ry="2" />
+<text text-anchor="" x="749.88" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >sun..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (142 samples, 3.65%)</title><rect x="571.0" y="277" width="28.5" height="15.0" fill="rgb(254,53,27)" rx="2" ry="2" />
+<text text-anchor="" x="573.98" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.subList(int, int) (6 samples, 0.15%)</title><rect x="523.2" y="245" width="1.3" height="15.0" fill="rgb(210,139,23)" rx="2" ry="2" />
+<text text-anchor="" x="526.25" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamEncoder.write(char[], int, int) (12 samples, 0.31%)</title><rect x="715.6" y="213" width="2.4" height="15.0" fill="rgb(231,23,54)" rx="2" ry="2" />
+<text text-anchor="" x="718.59" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8$Encoder.encodeLoop(java.nio.CharBuffer, java.nio.ByteBuffer) (11 samples, 0.28%)</title><rect x="715.8" y="165" width="2.2" height="15.0" fill="rgb(243,206,36)" rx="2" ry="2" />
+<text text-anchor="" x="718.79" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (22 samples, 0.57%)</title><rect x="560.6" y="245" width="4.4" height="15.0" fill="rgb(235,194,31)" rx="2" ry="2" />
+<text text-anchor="" x="563.55" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps.makeRef(java.util.stream.Collector) (2 samples, 0.05%)</title><rect x="463.1" y="261" width="0.4" height="15.0" fill="rgb(236,27,53)" rx="2" ry="2" />
+<text text-anchor="" x="466.08" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.main(java.lang.String[]) (3,887 samples, 99.95%)</title><rect x="10.0" y="325" width="779.6" height="15.0" fill="rgb(208,125,0)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="335.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotion.ElQuijoteMap.main(java.lang.String[])</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamOpFlag.fromCharacteristics(java.util.Spliterator) (8 samples, 0.21%)</title><rect x="603.1" y="245" width="1.6" height="15.0" fill="rgb(217,90,24)" rx="2" ry="2" />
+<text text-anchor="" x="606.07" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (38 samples, 0.98%)</title><rect x="495.6" y="213" width="7.6" height="15.0" fill="rgb(205,127,45)" rx="2" ry="2" />
+<text text-anchor="" x="498.57" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.&lt;init&gt;(java.util.ArrayList) (2 samples, 0.05%)</title><rect x="595.9" y="197" width="0.4" height="15.0" fill="rgb(242,179,32)" rx="2" ry="2" />
+<text text-anchor="" x="598.85" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (3 samples, 0.08%)</title><rect x="219.2" y="197" width="0.6" height="15.0" fill="rgb(250,38,8)" rx="2" ry="2" />
+<text text-anchor="" x="222.19" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.iterator() (4 samples, 0.10%)</title><rect x="216.6" y="229" width="0.8" height="15.0" fill="rgb(225,132,51)" rx="2" ry="2" />
+<text text-anchor="" x="219.58" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.ref.Finalizer.access$100(java.lang.ref.Finalizer, sun.misc.JavaLangAccess) (1 samples, 0.03%)</title><rect x="789.8" y="309" width="0.2" height="15.0" fill="rgb(210,104,35)" rx="2" ry="2" />
+<text text-anchor="" x="792.80" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.FilterInputStream.available() (1 samples, 0.03%)</title><rect x="787.4" y="133" width="0.2" height="15.0" fill="rgb(242,43,6)" rx="2" ry="2" />
+<text text-anchor="" x="790.39" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(int, int) (53 samples, 1.36%)</title><rect x="472.5" y="245" width="10.6" height="15.0" fill="rgb(249,82,3)" rx="2" ry="2" />
+<text text-anchor="" x="475.50" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.forInputStreamReader(java.io.InputStream, java.lang.Object, java.lang.String) (1 samples, 0.03%)</title><rect x="729.2" y="277" width="0.2" height="15.0" fill="rgb(234,57,46)" rx="2" ry="2" />
+<text text-anchor="" x="732.23" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$Head.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="223.6" y="245" width="0.4" height="15.0" fill="rgb(206,200,9)" rx="2" ry="2" />
+<text text-anchor="" x="226.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (4 samples, 0.10%)</title><rect x="788.2" y="197" width="0.8" height="15.0" fill="rgb(238,84,17)" rx="2" ry="2" />
+<text text-anchor="" x="791.19" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (7 samples, 0.18%)</title><rect x="720.4" y="277" width="1.4" height="15.0" fill="rgb(254,152,54)" rx="2" ry="2" />
+<text text-anchor="" x="723.40" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (9 samples, 0.23%)</title><rect x="597.3" y="197" width="1.8" height="15.0" fill="rgb(211,181,14)" rx="2" ry="2" />
+<text text-anchor="" x="600.26" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (15 samples, 0.39%)</title><rect x="217.4" y="261" width="3.0" height="15.0" fill="rgb(211,167,21)" rx="2" ry="2" />
+<text text-anchor="" x="220.38" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.iterator() (3 samples, 0.08%)</title><rect x="595.7" y="229" width="0.6" height="15.0" fill="rgb(251,160,54)" rx="2" ry="2" />
+<text text-anchor="" x="598.65" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.toString() (152 samples, 3.91%)</title><rect x="186.9" y="245" width="30.5" height="15.0" fill="rgb(226,40,0)" rx="2" ry="2" />
+<text text-anchor="" x="189.90" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (7 samples, 0.18%)</title><rect x="537.3" y="181" width="1.4" height="15.0" fill="rgb(207,44,17)" rx="2" ry="2" />
+<text text-anchor="" x="540.29" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (34 samples, 0.87%)</title><rect x="202.5" y="181" width="6.9" height="15.0" fill="rgb(217,22,34)" rx="2" ry="2" />
+<text text-anchor="" x="205.54" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.trace(java.lang.String) (5 samples, 0.13%)</title><rect x="182.5" y="277" width="1.0" height="15.0" fill="rgb(228,2,8)" rx="2" ry="2" />
+<text text-anchor="" x="185.49" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader$1.hasNext() (256 samples, 6.58%)</title><rect x="737.9" y="261" width="51.3" height="15.0" fill="rgb(236,159,8)" rx="2" ry="2" />
+<text text-anchor="" x="740.85" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.Writer.write(java.lang.String) (19 samples, 0.49%)</title><rect x="714.2" y="277" width="3.8" height="15.0" fill="rgb(234,183,53)" rx="2" ry="2" />
+<text text-anchor="" x="717.19" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.length() (8 samples, 0.21%)</title><rect x="686.5" y="133" width="1.6" height="15.0" fill="rgb(251,118,18)" rx="2" ry="2" />
+<text text-anchor="" x="689.51" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(java.lang.Object[], int) (12 samples, 0.31%)</title><rect x="700.9" y="85" width="2.5" height="15.0" fill="rgb(206,30,50)" rx="2" ry="2" />
+<text text-anchor="" x="703.95" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap$Node.&lt;init&gt;(int, java.lang.Object, java.lang.Object, java.util.HashMap$Node) (4 samples, 0.10%)</title><rect x="175.5" y="229" width="0.8" height="15.0" fill="rgb(225,131,24)" rx="2" ry="2" />
+<text text-anchor="" x="178.47" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (6 samples, 0.15%)</title><rect x="537.5" y="165" width="1.2" height="15.0" fill="rgb(207,220,9)" rx="2" ry="2" />
+<text text-anchor="" x="540.49" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.readBook(java.lang.String) (3,887 samples, 99.95%)</title><rect x="10.0" y="309" width="779.6" height="15.0" fill="rgb(246,165,15)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotion.ElQuijoteMap.readBook(java.lang.String)</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader.fill() (207 samples, 5.32%)</title><rect x="746.7" y="213" width="41.5" height="15.0" fill="rgb(221,84,15)" rx="2" ry="2" />
+<text text-anchor="" x="749.68" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >jav..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList.iterator() (1 samples, 0.03%)</title><rect x="507.4" y="229" width="0.2" height="15.0" fill="rgb(218,59,19)" rx="2" ry="2" />
+<text text-anchor="" x="510.40" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.ref.Finalizer.runFinalizer(sun.misc.JavaLangAccess) (1 samples, 0.03%)</title><rect x="789.8" y="293" width="0.2" height="15.0" fill="rgb(251,101,29)" rx="2" ry="2" />
+<text text-anchor="" x="792.80" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.wrapAndCopyInto(java.util.stream.Sink, java.util.Spliterator) (1,168 samples, 30.03%)</title><rect x="227.8" y="229" width="234.3" height="15.0" fill="rgb(207,26,8)" rx="2" ry="2" />
+<text text-anchor="" x="230.81" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.AbstractPipeli..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(java.lang.Object[], int) (13 samples, 0.33%)</title><rect x="456.5" y="85" width="2.6" height="15.0" fill="rgb(224,149,54)" rx="2" ry="2" />
+<text text-anchor="" x="459.46" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamSupport.stream(java.util.Spliterator, boolean) (17 samples, 0.44%)</title><rect x="601.3" y="261" width="3.4" height="15.0" fill="rgb(250,204,35)" rx="2" ry="2" />
+<text text-anchor="" x="604.27" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (3 samples, 0.08%)</title><rect x="565.0" y="245" width="0.6" height="15.0" fill="rgb(238,193,22)" rx="2" ry="2" />
+<text text-anchor="" x="567.97" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (15 samples, 0.39%)</title><rect x="217.4" y="245" width="3.0" height="15.0" fill="rgb(249,117,18)" rx="2" ry="2" />
+<text text-anchor="" x="220.38" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (2 samples, 0.05%)</title><rect x="575.0" y="229" width="0.4" height="15.0" fill="rgb(244,195,29)" rx="2" ry="2" />
+<text text-anchor="" x="577.99" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (1 samples, 0.03%)</title><rect x="789.0" y="197" width="0.2" height="15.0" fill="rgb(246,229,35)" rx="2" ry="2" />
+<text text-anchor="" x="792.00" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.next() (26 samples, 0.67%)</title><rect x="730.0" y="293" width="5.2" height="15.0" fill="rgb(236,203,47)" rx="2" ry="2" />
+<text text-anchor="" x="733.03" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(char) (1 samples, 0.03%)</title><rect x="688.1" y="133" width="0.2" height="15.0" fill="rgb(240,62,21)" rx="2" ry="2" />
+<text text-anchor="" x="691.11" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.length() (1 samples, 0.03%)</title><rect x="212.0" y="181" width="0.2" height="15.0" fill="rgb(206,126,38)" rx="2" ry="2" />
+<text text-anchor="" x="214.97" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureExplicitCapacity(int) (35 samples, 0.90%)</title><rect x="516.0" y="213" width="7.0" height="15.0" fill="rgb(243,44,11)" rx="2" ry="2" />
+<text text-anchor="" x="519.03" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (2 samples, 0.05%)</title><rect x="553.1" y="213" width="0.4" height="15.0" fill="rgb(238,32,37)" rx="2" ry="2" />
+<text text-anchor="" x="556.13" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3.&lt;init&gt;(java.util.stream.ReferencePipeline, java.util.stream.AbstractPipeline, java.util.stream.StreamShape, int, java.util.function.Function) (5 samples, 0.13%)</title><rect x="709.4" y="261" width="1.0" height="15.0" fill="rgb(247,157,7)" rx="2" ry="2" />
+<text text-anchor="" x="712.37" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Spliterators$IteratorSpliterator.tryAdvance(java.util.function.Consumer) (261 samples, 6.71%)</title><rect x="737.3" y="277" width="52.3" height="15.0" fill="rgb(230,122,12)" rx="2" ry="2" />
+<text text-anchor="" x="740.25" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (15 samples, 0.39%)</title><rect x="547.1" y="149" width="3.0" height="15.0" fill="rgb(208,98,51)" rx="2" ry="2" />
+<text text-anchor="" x="550.11" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.size() (1 samples, 0.03%)</title><rect x="523.0" y="245" width="0.2" height="15.0" fill="rgb(205,36,52)" rx="2" ry="2" />
+<text text-anchor="" x="526.05" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.concurrent.CopyOnWriteArrayList.size() (1 samples, 0.03%)</title><rect x="465.9" y="229" width="0.2" height="15.0" fill="rgb(246,20,31)" rx="2" ry="2" />
+<text text-anchor="" x="468.89" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap$HashIterator.nextNode() (32 samples, 0.82%)</title><rect x="722.6" y="245" width="6.4" height="15.0" fill="rgb(218,79,33)" rx="2" ry="2" />
+<text text-anchor="" x="725.61" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (10 samples, 0.26%)</title><rect x="591.6" y="229" width="2.0" height="15.0" fill="rgb(210,14,22)" rx="2" ry="2" />
+<text text-anchor="" x="594.64" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.&lt;init&gt;(java.util.function.Supplier, java.util.function.BiConsumer, java.util.function.BinaryOperator, java.util.Set) (1 samples, 0.03%)</title><rect x="605.3" y="261" width="0.2" height="15.0" fill="rgb(238,181,11)" rx="2" ry="2" />
+<text text-anchor="" x="608.28" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.removeSpecialChars(java.util.List) (1,418 samples, 36.46%)</title><rect x="180.5" y="293" width="284.4" height="15.0" fill="rgb(212,13,44)" rx="2" ry="2" />
+<text text-anchor="" x="183.48" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotion.ElQuijoteMap.re..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.wrapSink(java.util.stream.Sink) (10 samples, 0.26%)</title><rect x="704.2" y="213" width="2.0" height="15.0" fill="rgb(229,21,38)" rx="2" ry="2" />
+<text text-anchor="" x="707.16" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.evaluate(java.util.stream.TerminalOp) (1,177 samples, 30.26%)</title><rect x="227.0" y="261" width="236.1" height="15.0" fill="rgb(248,104,9)" rx="2" ry="2" />
+<text text-anchor="" x="230.01" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.AbstractPipeli..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.LoggerContext.getTurboFilterChainDecision_0_3OrMore(org.slf4j.Marker, ch.qos.logback.classic.Logger, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (5 samples, 0.13%)</title><rect x="182.5" y="245" width="1.0" height="15.0" fill="rgb(214,113,6)" rx="2" ry="2" />
+<text text-anchor="" x="185.49" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList.checkForComodification() (3 samples, 0.08%)</title><rect x="507.6" y="213" width="0.6" height="15.0" fill="rgb(205,78,43)" rx="2" ry="2" />
+<text text-anchor="" x="510.60" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.access$100(java.util.ArrayList) (2 samples, 0.05%)</title><rect x="729.6" y="277" width="0.4" height="15.0" fill="rgb(220,11,39)" rx="2" ry="2" />
+<text text-anchor="" x="732.63" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.toString() (126 samples, 3.24%)</title><rect x="571.0" y="245" width="25.3" height="15.0" fill="rgb(206,98,53)" rx="2" ry="2" />
+<text text-anchor="" x="573.98" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >j..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuffer.toString() (1 samples, 0.03%)</title><rect x="789.0" y="213" width="0.2" height="15.0" fill="rgb(253,72,6)" rx="2" ry="2" />
+<text text-anchor="" x="792.00" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (3 samples, 0.08%)</title><rect x="219.8" y="229" width="0.6" height="15.0" fill="rgb(220,9,0)" rx="2" ry="2" />
+<text text-anchor="" x="222.79" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8$Encoder.encodeArrayLoop(java.nio.CharBuffer, java.nio.ByteBuffer) (11 samples, 0.28%)</title><rect x="715.8" y="149" width="2.2" height="15.0" fill="rgb(238,36,22)" rx="2" ry="2" />
+<text text-anchor="" x="718.79" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.getOpFlags() (2 samples, 0.05%)</title><rect x="227.0" y="245" width="0.4" height="15.0" fill="rgb(205,198,2)" rx="2" ry="2" />
+<text text-anchor="" x="230.01" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.next() (9 samples, 0.23%)</title><rect x="214.8" y="229" width="1.8" height="15.0" fill="rgb(213,1,41)" rx="2" ry="2" />
+<text text-anchor="" x="217.78" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap$$Lambda$1.1626877848.get$Lambda(com.jerolba.codemotion.ElQuijoteMap) (6 samples, 0.15%)</title><rect x="183.5" y="277" width="1.2" height="15.0" fill="rgb(245,190,39)" rx="2" ry="2" />
+<text text-anchor="" x="186.49" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.readBytes() (3 samples, 0.08%)</title><rect x="787.6" y="149" width="0.6" height="15.0" fill="rgb(225,149,52)" rx="2" ry="2" />
+<text text-anchor="" x="790.59" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3ReducingSink.begin(long) (4 samples, 0.10%)</title><rect x="459.5" y="181" width="0.8" height="15.0" fill="rgb(249,16,47)" rx="2" ry="2" />
+<text text-anchor="" x="462.47" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (13 samples, 0.33%)</title><rect x="209.4" y="181" width="2.6" height="15.0" fill="rgb(231,209,51)" rx="2" ry="2" />
+<text text-anchor="" x="212.36" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.hashCode() (67 samples, 1.72%)</title><rect x="143.4" y="245" width="13.4" height="15.0" fill="rgb(242,144,26)" rx="2" ry="2" />
+<text text-anchor="" x="146.38" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.length() (1 samples, 0.03%)</title><rect x="720.2" y="229" width="0.2" height="15.0" fill="rgb(227,206,4)" rx="2" ry="2" />
+<text text-anchor="" x="723.20" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList.&lt;init&gt;() (1 samples, 0.03%)</title><rect x="703.6" y="149" width="0.2" height="15.0" fill="rgb(221,207,34)" rx="2" ry="2" />
+<text text-anchor="" x="706.56" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamOpFlag.isKnown(int) (2 samples, 0.05%)</title><rect x="460.7" y="197" width="0.4" height="15.0" fill="rgb(205,1,21)" rx="2" ry="2" />
+<text text-anchor="" x="463.67" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.concurrent.CopyOnWriteArrayList.getArray() (1 samples, 0.03%)</title><rect x="465.9" y="213" width="0.2" height="15.0" fill="rgb(237,74,20)" rx="2" ry="2" />
+<text text-anchor="" x="468.89" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (9 samples, 0.23%)</title><rect x="718.6" y="277" width="1.8" height="15.0" fill="rgb(212,95,10)" rx="2" ry="2" />
+<text text-anchor="" x="721.60" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.lambda$toLowerCase$2(java.lang.String) (338 samples, 8.69%)</title><rect x="620.5" y="165" width="67.8" height="15.0" fill="rgb(222,197,4)" rx="2" ry="2" />
+<text text-anchor="" x="623.52" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jer..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList$Itr.checkForComodification() (4 samples, 0.10%)</title><rect x="558.3" y="213" width="0.8" height="15.0" fill="rgb(212,102,2)" rx="2" ry="2" />
+<text text-anchor="" x="561.35" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays$ArrayList.&lt;init&gt;(java.lang.Object[]) (1 samples, 0.03%)</title><rect x="567.4" y="261" width="0.2" height="15.0" fill="rgb(208,8,11)" rx="2" ry="2" />
+<text text-anchor="" x="570.37" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.getOrDefault(java.lang.Object, java.lang.Object) (614 samples, 15.79%)</title><rect x="33.7" y="277" width="123.1" height="15.0" fill="rgb(245,31,52)" rx="2" ry="2" />
+<text text-anchor="" x="36.67" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.HashM..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.misc.URLClassPath$JarLoader.getResource(java.lang.String, boolean) (1 samples, 0.03%)</title><rect x="729.4" y="165" width="0.2" height="15.0" fill="rgb(252,146,31)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (1 samples, 0.03%)</title><rect x="719.4" y="229" width="0.2" height="15.0" fill="rgb(217,38,45)" rx="2" ry="2" />
+<text text-anchor="" x="722.40" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.spliterator() (5 samples, 0.13%)</title><rect x="600.3" y="261" width="1.0" height="15.0" fill="rgb(212,214,44)" rx="2" ry="2" />
+<text text-anchor="" x="603.26" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.length() (2 samples, 0.05%)</title><rect x="591.2" y="181" width="0.4" height="15.0" fill="rgb(244,43,20)" rx="2" ry="2" />
+<text text-anchor="" x="594.24" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.toArray(java.lang.Object[]) (25 samples, 0.64%)</title><rect x="503.2" y="245" width="5.0" height="15.0" fill="rgb(239,222,39)" rx="2" ry="2" />
+<text text-anchor="" x="506.19" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.implRead(char[], int, int) (206 samples, 5.30%)</title><rect x="746.9" y="165" width="41.3" height="15.0" fill="rgb(253,71,4)" rx="2" ry="2" />
+<text text-anchor="" x="749.88" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >sun..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.&lt;init&gt;() (3 samples, 0.08%)</title><rect x="459.7" y="133" width="0.6" height="15.0" fill="rgb(225,80,3)" rx="2" ry="2" />
+<text text-anchor="" x="462.67" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (5 samples, 0.13%)</title><rect x="565.8" y="245" width="1.0" height="15.0" fill="rgb(215,165,16)" rx="2" ry="2" />
+<text text-anchor="" x="568.77" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.add(java.lang.Object) (74 samples, 1.90%)</title><rect x="508.2" y="245" width="14.8" height="15.0" fill="rgb(236,196,49)" rx="2" ry="2" />
+<text text-anchor="" x="511.21" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.combiner() (1 samples, 0.03%)</title><rect x="707.8" y="245" width="0.2" height="15.0" fill="rgb(223,219,34)" rx="2" ry="2" />
+<text text-anchor="" x="710.77" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.split(java.lang.String) (512 samples, 13.17%)</title><rect x="464.9" y="293" width="102.7" height="15.0" fill="rgb(234,174,28)" rx="2" ry="2" />
+<text text-anchor="" x="467.88" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (4 samples, 0.10%)</title><rect x="721.8" y="277" width="0.8" height="15.0" fill="rgb(230,93,9)" rx="2" ry="2" />
+<text text-anchor="" x="724.81" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.inReady() (1 samples, 0.03%)</title><rect x="787.4" y="149" width="0.2" height="15.0" fill="rgb(221,75,49)" rx="2" ry="2" />
+<text text-anchor="" x="790.39" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.toLowerCase(java.util.List) (712 samples, 18.31%)</title><rect x="567.6" y="293" width="142.8" height="15.0" fill="rgb(236,143,42)" rx="2" ry="2" />
+<text text-anchor="" x="570.57" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemo..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (10 samples, 0.26%)</title><rect x="597.1" y="213" width="2.0" height="15.0" fill="rgb(210,211,17)" rx="2" ry="2" />
+<text text-anchor="" x="600.06" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>all (3,889 samples, 100%)</title><rect x="10.0" y="341" width="780.0" height="15.0" fill="rgb(231,27,7)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="351.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (8 samples, 0.21%)</title><rect x="524.5" y="277" width="1.6" height="15.0" fill="rgb(205,117,37)" rx="2" ry="2" />
+<text text-anchor="" x="527.45" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (31 samples, 0.80%)</title><rect x="194.1" y="197" width="6.2" height="15.0" fill="rgb(250,33,31)" rx="2" ry="2" />
+<text text-anchor="" x="197.12" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (18 samples, 0.46%)</title><rect x="561.0" y="213" width="3.6" height="15.0" fill="rgb(248,91,23)" rx="2" ry="2" />
+<text text-anchor="" x="563.95" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3$1.accept(java.lang.Object) (453 samples, 11.65%)</title><rect x="612.5" y="181" width="90.9" height="15.0" fill="rgb(223,217,6)" rx="2" ry="2" />
+<text text-anchor="" x="615.50" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.charAt(int) (38 samples, 0.98%)</title><rect x="314.3" y="133" width="7.6" height="15.0" fill="rgb(225,124,47)" rx="2" ry="2" />
+<text text-anchor="" x="317.26" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Spliterators.spliterator(java.lang.Object[], int) (4 samples, 0.10%)</title><rect x="222.6" y="245" width="0.8" height="15.0" fill="rgb(216,154,36)" rx="2" ry="2" />
+<text text-anchor="" x="225.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (7 samples, 0.18%)</title><rect x="720.4" y="261" width="1.4" height="15.0" fill="rgb(251,72,27)" rx="2" ry="2" />
+<text text-anchor="" x="723.40" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.&lt;init&gt;(java.util.Spliterator, int, boolean) (2 samples, 0.05%)</title><rect x="223.6" y="229" width="0.4" height="15.0" fill="rgb(222,158,32)" rx="2" ry="2" />
+<text text-anchor="" x="226.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (12 samples, 0.31%)</title><rect x="588.8" y="181" width="2.4" height="15.0" fill="rgb(222,130,26)" rx="2" ry="2" />
+<text text-anchor="" x="591.83" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays$ArrayList.spliterator() (4 samples, 0.10%)</title><rect x="222.6" y="261" width="0.8" height="15.0" fill="rgb(238,187,5)" rx="2" ry="2" />
+<text text-anchor="" x="225.60" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureCapacityInternal(int) (48 samples, 1.23%)</title><rect x="513.4" y="229" width="9.6" height="15.0" fill="rgb(234,183,42)" rx="2" ry="2" />
+<text text-anchor="" x="516.42" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (52 samples, 1.34%)</title><rect x="581.2" y="229" width="10.4" height="15.0" fill="rgb(214,102,16)" rx="2" ry="2" />
+<text text-anchor="" x="584.21" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.checkForComodification() (6 samples, 0.15%)</title><rect x="734.0" y="277" width="1.2" height="15.0" fill="rgb(219,31,23)" rx="2" ry="2" />
+<text text-anchor="" x="737.04" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$ArrayListSpliterator.forEachRemaining(java.util.function.Consumer) (481 samples, 12.37%)</title><rect x="606.9" y="197" width="96.5" height="15.0" fill="rgb(211,144,16)" rx="2" ry="2" />
+<text text-anchor="" x="609.88" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.A..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (6 samples, 0.15%)</title><rect x="720.4" y="245" width="1.2" height="15.0" fill="rgb(219,71,7)" rx="2" ry="2" />
+<text text-anchor="" x="723.40" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Spliterators$1Adapter.hasNext() (271 samples, 6.97%)</title><rect x="735.2" y="293" width="54.4" height="15.0" fill="rgb(234,77,33)" rx="2" ry="2" />
+<text text-anchor="" x="738.25" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (7 samples, 0.18%)</title><rect x="592.2" y="213" width="1.4" height="15.0" fill="rgb(227,206,15)" rx="2" ry="2" />
+<text text-anchor="" x="595.24" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.end() (1 samples, 0.03%)</title><rect x="703.8" y="197" width="0.2" height="15.0" fill="rgb(246,25,3)" rx="2" ry="2" />
+<text text-anchor="" x="706.76" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.removeSpecialChars(java.lang.String) (1,019 samples, 26.20%)</title><rect x="240.9" y="149" width="204.3" height="15.0" fill="rgb(247,5,37)" rx="2" ry="2" />
+<text text-anchor="" x="243.85" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jerolba.codemotion.ElQ..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.hashCode() (9 samples, 0.23%)</title><rect x="157.2" y="245" width="1.8" height="15.0" fill="rgb(211,31,15)" rx="2" ry="2" />
+<text text-anchor="" x="160.22" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.FilterInputStream.read(byte[], int, int) (1 samples, 0.03%)</title><rect x="787.8" y="133" width="0.2" height="15.0" fill="rgb(209,160,29)" rx="2" ry="2" />
+<text text-anchor="" x="790.79" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Collections$UnmodifiableCollection.contains(java.lang.Object) (2 samples, 0.05%)</title><rect x="226.6" y="261" width="0.4" height="15.0" fill="rgb(243,62,24)" rx="2" ry="2" />
+<text text-anchor="" x="229.61" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (2 samples, 0.05%)</title><rect x="191.5" y="229" width="0.4" height="15.0" fill="rgb(245,74,19)" rx="2" ry="2" />
+<text text-anchor="" x="194.51" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.equals(java.lang.Object) (1 samples, 0.03%)</title><rect x="174.7" y="245" width="0.2" height="15.0" fill="rgb(247,115,15)" rx="2" ry="2" />
+<text text-anchor="" x="177.66" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8.updatePositions(java.nio.Buffer, int, java.nio.Buffer, int) (51 samples, 1.31%)</title><rect x="777.2" y="69" width="10.2" height="15.0" fill="rgb(251,121,10)" rx="2" ry="2" />
+<text text-anchor="" x="780.16" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3$1.accept(java.lang.Object) (1,141 samples, 29.34%)</title><rect x="230.2" y="181" width="228.9" height="15.0" fill="rgb(218,7,27)" rx="2" ry="2" />
+<text text-anchor="" x="233.22" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.ReferencePipe..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.split(java.lang.String) (291 samples, 7.48%)</title><rect x="466.1" y="277" width="58.4" height="15.0" fill="rgb(213,144,23)" rx="2" ry="2" />
+<text text-anchor="" x="469.09" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (16 samples, 0.41%)</title><rect x="596.3" y="261" width="3.2" height="15.0" fill="rgb(245,142,3)" rx="2" ry="2" />
+<text text-anchor="" x="599.25" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.zip.InflaterInputStream.read(byte[], int, int) (1 samples, 0.03%)</title><rect x="787.8" y="117" width="0.2" height="15.0" fill="rgb(243,168,45)" rx="2" ry="2" />
+<text text-anchor="" x="790.79" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.resize() (21 samples, 0.54%)</title><rect x="176.3" y="245" width="4.2" height="15.0" fill="rgb(220,47,5)" rx="2" ry="2" />
+<text text-anchor="" x="179.27" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.hasNext() (4 samples, 0.10%)</title><rect x="214.0" y="229" width="0.8" height="15.0" fill="rgb(238,208,5)" rx="2" ry="2" />
+<text text-anchor="" x="216.98" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (4 samples, 0.10%)</title><rect x="721.8" y="261" width="0.8" height="15.0" fill="rgb(247,167,48)" rx="2" ry="2" />
+<text text-anchor="" x="724.81" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (33 samples, 0.85%)</title><rect x="543.5" y="181" width="6.6" height="15.0" fill="rgb(237,12,6)" rx="2" ry="2" />
+<text text-anchor="" x="546.50" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (12 samples, 0.31%)</title><rect x="197.9" y="181" width="2.4" height="15.0" fill="rgb(241,207,35)" rx="2" ry="2" />
+<text text-anchor="" x="200.93" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.&lt;init&gt;(java.util.function.Supplier, java.util.function.BiConsumer, java.util.function.BinaryOperator, java.util.function.Function, java.util.Set) (1 samples, 0.03%)</title><rect x="226.0" y="245" width="0.2" height="15.0" fill="rgb(253,94,14)" rx="2" ry="2" />
+<text text-anchor="" x="229.01" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (4 samples, 0.10%)</title><rect x="599.5" y="277" width="0.8" height="15.0" fill="rgb(210,73,5)" rx="2" ry="2" />
+<text text-anchor="" x="602.46" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.grow(int) (20 samples, 0.51%)</title><rect x="455.1" y="101" width="4.0" height="15.0" fill="rgb(252,121,25)" rx="2" ry="2" />
+<text text-anchor="" x="458.06" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (1 samples, 0.03%)</title><rect x="221.0" y="245" width="0.2" height="15.0" fill="rgb(246,0,21)" rx="2" ry="2" />
+<text text-anchor="" x="224.00" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.trace(java.lang.String) (3 samples, 0.08%)</title><rect x="569.2" y="277" width="0.6" height="15.0" fill="rgb(243,194,52)" rx="2" ry="2" />
+<text text-anchor="" x="572.18" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (16 samples, 0.41%)</title><rect x="585.6" y="165" width="3.2" height="15.0" fill="rgb(223,66,31)" rx="2" ry="2" />
+<text text-anchor="" x="588.62" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (168 samples, 4.32%)</title><rect x="186.7" y="277" width="33.7" height="15.0" fill="rgb(250,34,12)" rx="2" ry="2" />
+<text text-anchor="" x="189.70" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (194 samples, 4.99%)</title><rect x="526.1" y="277" width="38.9" height="15.0" fill="rgb(243,110,47)" rx="2" ry="2" />
+<text text-anchor="" x="529.06" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >jav..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (5 samples, 0.13%)</title><rect x="221.6" y="245" width="1.0" height="15.0" fill="rgb(221,202,54)" rx="2" ry="2" />
+<text text-anchor="" x="224.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(int, int) (1 samples, 0.03%)</title><rect x="472.3" y="229" width="0.2" height="15.0" fill="rgb(249,181,24)" rx="2" ry="2" />
+<text text-anchor="" x="475.30" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.security.AccessController.doPrivileged(java.security.PrivilegedAction, java.security.AccessControlContext) (1 samples, 0.03%)</title><rect x="729.4" y="245" width="0.2" height="15.0" fill="rgb(253,52,18)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.asList(java.lang.Object[]) (4 samples, 0.10%)</title><rect x="566.8" y="277" width="0.8" height="15.0" fill="rgb(238,4,42)" rx="2" ry="2" />
+<text text-anchor="" x="569.77" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.add(java.lang.Object) (66 samples, 1.70%)</title><rect x="690.1" y="149" width="13.3" height="15.0" fill="rgb(214,180,51)" rx="2" ry="2" />
+<text text-anchor="" x="693.12" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(char[], int, int, char[], int, int, int) (1 samples, 0.03%)</title><rect x="729.4" y="37" width="0.2" height="15.0" fill="rgb(230,99,15)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(char) (29 samples, 0.75%)</title><rect x="575.4" y="229" width="5.8" height="15.0" fill="rgb(214,133,26)" rx="2" ry="2" />
+<text text-anchor="" x="578.39" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(java.lang.String, int) (1 samples, 0.03%)</title><rect x="729.4" y="53" width="0.2" height="15.0" fill="rgb(212,131,3)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (24 samples, 0.62%)</title><rect x="576.4" y="197" width="4.8" height="15.0" fill="rgb(229,198,4)" rx="2" ry="2" />
+<text text-anchor="" x="579.40" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3ReducingSink.accept(java.lang.Object) (69 samples, 1.77%)</title><rect x="445.2" y="165" width="13.9" height="15.0" fill="rgb(246,42,17)" rx="2" ry="2" />
+<text text-anchor="" x="448.23" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Objects.requireNonNull(java.lang.Object) (1 samples, 0.03%)</title><rect x="567.4" y="245" width="0.2" height="15.0" fill="rgb(226,105,22)" rx="2" ry="2" />
+<text text-anchor="" x="570.37" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.trace(java.lang.String) (3 samples, 0.08%)</title><rect x="465.5" y="277" width="0.6" height="15.0" fill="rgb(229,9,20)" rx="2" ry="2" />
+<text text-anchor="" x="468.48" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(char) (42 samples, 1.08%)</title><rect x="191.9" y="213" width="8.4" height="15.0" fill="rgb(213,131,37)" rx="2" ry="2" />
+<text text-anchor="" x="194.91" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (4 samples, 0.10%)</title><rect x="570.2" y="277" width="0.8" height="15.0" fill="rgb(215,23,25)" rx="2" ry="2" />
+<text text-anchor="" x="573.18" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (9 samples, 0.23%)</title><rect x="218.0" y="229" width="1.8" height="15.0" fill="rgb(214,184,19)" rx="2" ry="2" />
+<text text-anchor="" x="220.99" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (15 samples, 0.39%)</title><rect x="596.5" y="245" width="3.0" height="15.0" fill="rgb(209,185,35)" rx="2" ry="2" />
+<text text-anchor="" x="599.45" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.ensureOpen() (1 samples, 0.03%)</title><rect x="746.7" y="165" width="0.2" height="15.0" fill="rgb(225,104,3)" rx="2" ry="2" />
+<text text-anchor="" x="749.68" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8$Decoder.xflow(java.nio.Buffer, int, int, java.nio.Buffer, int, int) (73 samples, 1.88%)</title><rect x="772.8" y="101" width="14.6" height="15.0" fill="rgb(210,155,9)" rx="2" ry="2" />
+<text text-anchor="" x="775.75" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader$1.next() (2 samples, 0.05%)</title><rect x="789.2" y="245" width="0.4" height="15.0" fill="rgb(249,101,46)" rx="2" ry="2" />
+<text text-anchor="" x="792.20" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8.access$200(java.nio.Buffer, int, java.nio.Buffer, int) (51 samples, 1.31%)</title><rect x="777.2" y="85" width="10.2" height="15.0" fill="rgb(237,116,7)" rx="2" ry="2" />
+<text text-anchor="" x="780.16" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$SubList$1.hasNext() (1 samples, 0.03%)</title><rect x="506.2" y="229" width="0.2" height="15.0" fill="rgb(244,202,52)" rx="2" ry="2" />
+<text text-anchor="" x="509.20" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (15 samples, 0.39%)</title><rect x="561.6" y="197" width="3.0" height="15.0" fill="rgb(227,224,22)" rx="2" ry="2" />
+<text text-anchor="" x="564.56" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (3 samples, 0.08%)</title><rect x="718.0" y="277" width="0.6" height="15.0" fill="rgb(228,72,24)" rx="2" ry="2" />
+<text text-anchor="" x="721.00" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (2 samples, 0.05%)</title><rect x="599.1" y="229" width="0.4" height="15.0" fill="rgb(222,98,18)" rx="2" ry="2" />
+<text text-anchor="" x="602.06" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (2 samples, 0.05%)</title><rect x="191.5" y="213" width="0.4" height="15.0" fill="rgb(227,195,14)" rx="2" ry="2" />
+<text text-anchor="" x="194.51" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.split(java.lang.String, int) (290 samples, 7.46%)</title><rect x="466.3" y="261" width="58.2" height="15.0" fill="rgb(205,127,6)" rx="2" ry="2" />
+<text text-anchor="" x="469.29" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.copyInto(java.util.stream.Sink, java.util.Spliterator) (1,163 samples, 29.90%)</title><rect x="227.8" y="213" width="233.3" height="15.0" fill="rgb(221,87,16)" rx="2" ry="2" />
+<text text-anchor="" x="230.81" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.AbstractPipel..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.collect(java.util.stream.Collector) (511 samples, 13.14%)</title><rect x="605.5" y="277" width="102.5" height="15.0" fill="rgb(214,13,35)" rx="2" ry="2" />
+<text text-anchor="" x="608.48" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.st..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.entrySet() (1 samples, 0.03%)</title><rect x="729.0" y="277" width="0.2" height="15.0" fill="rgb(222,65,25)" rx="2" ry="2" />
+<text text-anchor="" x="732.03" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.&lt;init&gt;(java.util.stream.AbstractPipeline, int) (4 samples, 0.10%)</title><rect x="709.6" y="229" width="0.8" height="15.0" fill="rgb(236,203,8)" rx="2" ry="2" />
+<text text-anchor="" x="712.57" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$ReduceOp.evaluateSequential(java.util.stream.PipelineHelper, java.util.Spliterator) (504 samples, 12.96%)</title><rect x="605.7" y="245" width="101.1" height="15.0" fill="rgb(221,111,41)" rx="2" ry="2" />
+<text text-anchor="" x="608.68" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.st..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (10 samples, 0.26%)</title><rect x="184.7" y="277" width="2.0" height="15.0" fill="rgb(236,72,22)" rx="2" ry="2" />
+<text text-anchor="" x="187.69" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap.toLowerCase(java.lang.String) (335 samples, 8.61%)</title><rect x="621.1" y="149" width="67.2" height="15.0" fill="rgb(236,124,9)" rx="2" ry="2" />
+<text text-anchor="" x="624.12" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >com.jer..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (5 samples, 0.13%)</title><rect x="719.4" y="245" width="1.0" height="15.0" fill="rgb(226,59,0)" rx="2" ry="2" />
+<text text-anchor="" x="722.40" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList.listIterator() (1 samples, 0.03%)</title><rect x="507.4" y="213" width="0.2" height="15.0" fill="rgb(225,63,40)" rx="2" ry="2" />
+<text text-anchor="" x="510.40" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (4 samples, 0.10%)</title><rect x="788.2" y="213" width="0.8" height="15.0" fill="rgb(249,41,46)" rx="2" ry="2" />
+<text text-anchor="" x="791.19" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.wrapSink(java.util.stream.Sink) (5 samples, 0.13%)</title><rect x="461.1" y="213" width="1.0" height="15.0" fill="rgb(220,103,8)" rx="2" ry="2" />
+<text text-anchor="" x="464.07" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.LinkedList.indexOf(java.lang.Object) (503 samples, 12.93%)</title><rect x="344.3" y="117" width="100.9" height="15.0" fill="rgb(223,136,42)" rx="2" ry="2" />
+<text text-anchor="" x="347.34" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.Li..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.equals(java.lang.Object) (1 samples, 0.03%)</title><rect x="142.8" y="245" width="0.2" height="15.0" fill="rgb(234,34,40)" rx="2" ry="2" />
+<text text-anchor="" x="145.77" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(char) (39 samples, 1.00%)</title><rect x="530.9" y="229" width="7.8" height="15.0" fill="rgb(222,2,11)" rx="2" ry="2" />
+<text text-anchor="" x="533.87" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.InputStreamReader.&lt;init&gt;(java.io.InputStream) (1 samples, 0.03%)</title><rect x="729.2" y="293" width="0.2" height="15.0" fill="rgb(247,190,53)" rx="2" ry="2" />
+<text text-anchor="" x="732.23" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.LoggerContext.getTurboFilterChainDecision_0_3OrMore(org.slf4j.Marker, ch.qos.logback.classic.Logger, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (2 samples, 0.05%)</title><rect x="465.7" y="245" width="0.4" height="15.0" fill="rgb(210,108,10)" rx="2" ry="2" />
+<text text-anchor="" x="468.69" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.StreamDecoder.&lt;init&gt;(java.io.InputStream, java.lang.Object, java.nio.charset.Charset) (1 samples, 0.03%)</title><rect x="729.2" y="261" width="0.2" height="15.0" fill="rgb(253,142,15)" rx="2" ry="2" />
+<text text-anchor="" x="732.23" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.filterAndLog_0_Or3Plus(java.lang.String, org.slf4j.Marker, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (5 samples, 0.13%)</title><rect x="182.5" y="261" width="1.0" height="15.0" fill="rgb(212,6,43)" rx="2" ry="2" />
+<text text-anchor="" x="185.49" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.misc.URLClassPath$JarLoader.checkResource(java.lang.String, boolean, java.util.jar.JarEntry) (1 samples, 0.03%)</title><rect x="729.4" y="149" width="0.2" height="15.0" fill="rgb(231,207,20)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.ByteBuffer.arrayOffset() (12 samples, 0.31%)</title><rect x="785.0" y="53" width="2.4" height="15.0" fill="rgb(225,25,42)" rx="2" ry="2" />
+<text text-anchor="" x="787.99" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.Logger.filterAndLog_0_Or3Plus(java.lang.String, org.slf4j.Marker, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (2 samples, 0.05%)</title><rect x="465.7" y="261" width="0.4" height="15.0" fill="rgb(219,156,54)" rx="2" ry="2" />
+<text text-anchor="" x="468.69" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3ReducingSink.accept(java.lang.Object) (75 samples, 1.93%)</title><rect x="688.3" y="165" width="15.1" height="15.0" fill="rgb(247,83,0)" rx="2" ry="2" />
+<text text-anchor="" x="691.31" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.StreamSupport.stream(java.util.Spliterator, boolean) (6 samples, 0.15%)</title><rect x="223.4" y="261" width="1.2" height="15.0" fill="rgb(236,184,24)" rx="2" ry="2" />
+<text text-anchor="" x="226.40" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.put(java.lang.Object, java.lang.Object) (118 samples, 3.03%)</title><rect x="156.8" y="277" width="23.7" height="15.0" fill="rgb(251,184,36)" rx="2" ry="2" />
+<text text-anchor="" x="159.81" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >j..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3.makeSink() (3 samples, 0.08%)</title><rect x="706.2" y="229" width="0.6" height="15.0" fill="rgb(231,158,48)" rx="2" ry="2" />
+<text text-anchor="" x="709.16" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.String) (51 samples, 1.31%)</title><rect x="581.4" y="213" width="10.2" height="15.0" fill="rgb(207,20,0)" rx="2" ry="2" />
+<text text-anchor="" x="584.41" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.&lt;init&gt;(java.util.stream.Sink) (1 samples, 0.03%)</title><rect x="706.0" y="165" width="0.2" height="15.0" fill="rgb(218,120,7)" rx="2" ry="2" />
+<text text-anchor="" x="708.96" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.net.URLClassLoader$2.run() (1 samples, 0.03%)</title><rect x="729.4" y="213" width="0.2" height="15.0" fill="rgb(220,122,9)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3.opWrapSink(int, java.util.stream.Sink) (4 samples, 0.10%)</title><rect x="461.3" y="197" width="0.8" height="15.0" fill="rgb(224,91,6)" rx="2" ry="2" />
+<text text-anchor="" x="464.27" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.&lt;init&gt;(java.util.ArrayList, java.util.ArrayList$1) (2 samples, 0.05%)</title><rect x="595.9" y="213" width="0.4" height="15.0" fill="rgb(214,97,3)" rx="2" ry="2" />
+<text text-anchor="" x="598.85" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (6 samples, 0.15%)</title><rect x="580.0" y="165" width="1.2" height="15.0" fill="rgb(234,132,28)" rx="2" ry="2" />
+<text text-anchor="" x="583.01" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.ref.Finalizer$FinalizerThread.run() (2 samples, 0.05%)</title><rect x="789.6" y="325" width="0.4" height="15.0" fill="rgb(238,96,25)" rx="2" ry="2" />
+<text text-anchor="" x="792.60" y="335.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.net.www.ParseUtil.canonizeString(java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="85" width="0.2" height="15.0" fill="rgb(227,34,5)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>com.jerolba.codemotion.ElQuijoteMap$$Lambda$6.99347477.get$Lambda(com.jerolba.codemotion.ElQuijoteMap) (2 samples, 0.05%)</title><rect x="569.8" y="277" width="0.4" height="15.0" fill="rgb(239,17,2)" rx="2" ry="2" />
+<text text-anchor="" x="572.78" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.AbstractPipeline.copyInto(java.util.stream.Sink, java.util.Spliterator) (487 samples, 12.52%)</title><rect x="606.5" y="213" width="97.7" height="15.0" fill="rgb(231,209,30)" rx="2" ry="2" />
+<text text-anchor="" x="609.48" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.s..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader$1.next() (2 samples, 0.05%)</title><rect x="789.2" y="261" width="0.4" height="15.0" fill="rgb(213,119,1)" rx="2" ry="2" />
+<text text-anchor="" x="792.20" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractCollection.&lt;init&gt;() (1 samples, 0.03%)</title><rect x="703.6" y="133" width="0.2" height="15.0" fill="rgb(214,60,5)" rx="2" ry="2" />
+<text text-anchor="" x="706.56" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.&lt;init&gt;() (4 samples, 0.10%)</title><rect x="459.5" y="165" width="0.8" height="15.0" fill="rgb(214,88,8)" rx="2" ry="2" />
+<text text-anchor="" x="462.47" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.map(java.util.function.Function) (7 samples, 0.18%)</title><rect x="463.5" y="277" width="1.4" height="15.0" fill="rgb(247,213,15)" rx="2" ry="2" />
+<text text-anchor="" x="466.48" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.&lt;init&gt;() (3 samples, 0.08%)</title><rect x="530.3" y="229" width="0.6" height="15.0" fill="rgb(222,86,18)" rx="2" ry="2" />
+<text text-anchor="" x="533.27" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReduceOps$3ReducingSink.&lt;init&gt;(java.util.function.Supplier, java.util.function.BiConsumer, java.util.function.BinaryOperator) (1 samples, 0.03%)</title><rect x="462.9" y="197" width="0.2" height="15.0" fill="rgb(222,108,12)" rx="2" ry="2" />
+<text text-anchor="" x="465.88" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Integer.intValue() (1 samples, 0.03%)</title><rect x="28.3" y="277" width="0.2" height="15.0" fill="rgb(240,97,11)" rx="2" ry="2" />
+<text text-anchor="" x="31.25" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (2 samples, 0.05%)</title><rect x="220.6" y="245" width="0.4" height="15.0" fill="rgb(250,146,16)" rx="2" ry="2" />
+<text text-anchor="" x="223.59" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.ensureCapacityInternal(int) (19 samples, 0.49%)</title><rect x="560.8" y="229" width="3.8" height="15.0" fill="rgb(214,80,0)" rx="2" ry="2" />
+<text text-anchor="" x="563.75" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.next() (9 samples, 0.23%)</title><rect x="593.8" y="229" width="1.9" height="15.0" fill="rgb(241,175,3)" rx="2" ry="2" />
+<text text-anchor="" x="596.85" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (3 samples, 0.08%)</title><rect x="722.0" y="245" width="0.6" height="15.0" fill="rgb(252,219,14)" rx="2" ry="2" />
+<text text-anchor="" x="725.01" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sun.nio.cs.UTF_8$Decoder.decodeLoop(java.nio.ByteBuffer, java.nio.CharBuffer) (202 samples, 5.19%)</title><rect x="746.9" y="133" width="40.5" height="15.0" fill="rgb(239,82,21)" rx="2" ry="2" />
+<text text-anchor="" x="749.88" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >sun..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (61 samples, 1.57%)</title><rect x="491.0" y="229" width="12.2" height="15.0" fill="rgb(233,17,0)" rx="2" ry="2" />
+<text text-anchor="" x="493.96" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.&lt;init&gt;(char[], int, int) (7 samples, 0.18%)</title><rect x="221.2" y="261" width="1.4" height="15.0" fill="rgb(251,105,39)" rx="2" ry="2" />
+<text text-anchor="" x="224.20" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.AbstractList$Itr.next() (12 samples, 0.31%)</title><rect x="557.1" y="229" width="2.5" height="15.0" fill="rgb(239,215,13)" rx="2" ry="2" />
+<text text-anchor="" x="560.14" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ch.qos.logback.classic.LoggerContext.getTurboFilterChainDecision_0_3OrMore(org.slf4j.Marker, ch.qos.logback.classic.Logger, ch.qos.logback.classic.Level, java.lang.String, java.lang.Object[], java.lang.Throwable) (2 samples, 0.05%)</title><rect x="569.4" y="245" width="0.4" height="15.0" fill="rgb(232,127,19)" rx="2" ry="2" />
+<text text-anchor="" x="572.38" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap.getNode(int, java.lang.Object) (537 samples, 13.81%)</title><rect x="35.3" y="261" width="107.7" height="15.0" fill="rgb(231,116,1)" rx="2" ry="2" />
+<text text-anchor="" x="38.27" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.Has..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.InputStreamReader.read(char[], int, int) (207 samples, 5.32%)</title><rect x="746.7" y="197" width="41.5" height="15.0" fill="rgb(239,120,38)" rx="2" ry="2" />
+<text text-anchor="" x="749.68" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >jav..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.append(java.lang.Object) (59 samples, 1.52%)</title><rect x="200.3" y="229" width="11.9" height="15.0" fill="rgb(227,18,39)" rx="2" ry="2" />
+<text text-anchor="" x="203.34" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (9 samples, 0.23%)</title><rect x="198.5" y="165" width="1.8" height="15.0" fill="rgb(219,18,15)" rx="2" ry="2" />
+<text text-anchor="" x="201.53" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (1 samples, 0.03%)</title><rect x="581.2" y="213" width="0.2" height="15.0" fill="rgb(232,163,0)" rx="2" ry="2" />
+<text text-anchor="" x="584.21" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.Integer.valueOf(int) (26 samples, 0.67%)</title><rect x="28.5" y="277" width="5.2" height="15.0" fill="rgb(247,151,43)" rx="2" ry="2" />
+<text text-anchor="" x="31.45" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (1 samples, 0.03%)</title><rect x="721.6" y="245" width="0.2" height="15.0" fill="rgb(222,129,46)" rx="2" ry="2" />
+<text text-anchor="" x="724.61" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.StringBuilder.toString() (4 samples, 0.10%)</title><rect x="552.7" y="229" width="0.8" height="15.0" fill="rgb(251,101,6)" rx="2" ry="2" />
+<text text-anchor="" x="555.73" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (6 samples, 0.15%)</title><rect x="592.4" y="197" width="1.2" height="15.0" fill="rgb(238,100,18)" rx="2" ry="2" />
+<text text-anchor="" x="595.44" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureExplicitCapacity(int) (37 samples, 0.95%)</title><rect x="451.6" y="117" width="7.5" height="15.0" fill="rgb(235,224,8)" rx="2" ry="2" />
+<text text-anchor="" x="454.65" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.map(java.util.function.Function) (12 samples, 0.31%)</title><rect x="708.0" y="277" width="2.4" height="15.0" fill="rgb(253,220,24)" rx="2" ry="2" />
+<text text-anchor="" x="710.97" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline$3.opWrapSink(int, java.util.stream.Sink) (6 samples, 0.15%)</title><rect x="705.0" y="197" width="1.2" height="15.0" fill="rgb(212,129,18)" rx="2" ry="2" />
+<text text-anchor="" x="707.96" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.expandCapacity(int) (22 samples, 0.57%)</title><rect x="204.9" y="165" width="4.5" height="15.0" fill="rgb(242,25,46)" rx="2" ry="2" />
+<text text-anchor="" x="207.95" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(java.lang.String) (1 samples, 0.03%)</title><rect x="729.4" y="69" width="0.2" height="15.0" fill="rgb(244,203,0)" rx="2" ry="2" />
+<text text-anchor="" x="732.43" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.RegularEnumSet.contains(java.lang.Object) (1 samples, 0.03%)</title><rect x="227.2" y="213" width="0.2" height="15.0" fill="rgb(248,213,49)" rx="2" ry="2" />
+<text text-anchor="" x="230.21" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.indexOf(int) (1 samples, 0.03%)</title><rect x="472.3" y="245" width="0.2" height="15.0" fill="rgb(248,123,3)" rx="2" ry="2" />
+<text text-anchor="" x="475.30" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOf(char[], int) (2 samples, 0.05%)</title><rect x="220.6" y="213" width="0.4" height="15.0" fill="rgb(220,48,30)" rx="2" ry="2" />
+<text text-anchor="" x="223.59" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (4 samples, 0.10%)</title><rect x="599.5" y="245" width="0.8" height="15.0" fill="rgb(218,134,34)" rx="2" ry="2" />
+<text text-anchor="" x="602.46" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(char) (39 samples, 1.00%)</title><rect x="530.9" y="213" width="7.8" height="15.0" fill="rgb(232,75,8)" rx="2" ry="2" />
+<text text-anchor="" x="533.87" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.getChars(int, int, char[], int) (13 samples, 0.33%)</title><rect x="550.1" y="181" width="2.6" height="15.0" fill="rgb(229,209,12)" rx="2" ry="2" />
+<text text-anchor="" x="553.12" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Sink$ChainedReference.&lt;init&gt;(java.util.stream.Sink) (2 samples, 0.05%)</title><rect x="461.7" y="165" width="0.4" height="15.0" fill="rgb(238,161,48)" rx="2" ry="2" />
+<text text-anchor="" x="464.67" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.hasNext() (1 samples, 0.03%)</title><rect x="593.6" y="229" width="0.2" height="15.0" fill="rgb(220,65,26)" rx="2" ry="2" />
+<text text-anchor="" x="596.65" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.ensureExplicitCapacity(int) (33 samples, 0.85%)</title><rect x="696.7" y="117" width="6.7" height="15.0" fill="rgb(222,1,47)" rx="2" ry="2" />
+<text text-anchor="" x="699.74" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.BufferedReader.readLine(boolean) (253 samples, 6.51%)</title><rect x="738.5" y="229" width="50.7" height="15.0" fill="rgb(237,212,22)" rx="2" ry="2" />
+<text text-anchor="" x="741.45" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (4 samples, 0.10%)</title><rect x="220.4" y="261" width="0.8" height="15.0" fill="rgb(244,86,50)" rx="2" ry="2" />
+<text text-anchor="" x="223.39" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.valueOf(java.lang.Object) (153 samples, 3.93%)</title><rect x="186.7" y="261" width="30.7" height="15.0" fill="rgb(236,156,33)" rx="2" ry="2" />
+<text text-anchor="" x="189.70" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >ja..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.String.substring(int, int) (100 samples, 2.57%)</title><rect x="483.1" y="245" width="20.1" height="15.0" fill="rgb(228,76,21)" rx="2" ry="2" />
+<text text-anchor="" x="486.13" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors.toList() (8 samples, 0.21%)</title><rect x="224.6" y="277" width="1.6" height="15.0" fill="rgb(227,143,33)" rx="2" ry="2" />
+<text text-anchor="" x="227.61" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Arrays.copyOfRange(char[], int, int) (4 samples, 0.10%)</title><rect x="213.2" y="197" width="0.8" height="15.0" fill="rgb(248,224,35)" rx="2" ry="2" />
+<text text-anchor="" x="216.17" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.Collection.stream() (22 samples, 0.57%)</title><rect x="600.3" y="277" width="4.4" height="15.0" fill="rgb(210,92,51)" rx="2" ry="2" />
+<text text-anchor="" x="603.26" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.ReferencePipeline.collect(java.util.stream.Collector) (1,183 samples, 30.42%)</title><rect x="226.2" y="277" width="237.3" height="15.0" fill="rgb(206,125,44)" rx="2" ry="2" />
+<text text-anchor="" x="229.21" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >java.util.stream.ReferencePipel..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.io.OutputStreamWriter.write(char[], int, int) (12 samples, 0.31%)</title><rect x="715.6" y="229" width="2.4" height="15.0" fill="rgb(218,9,36)" rx="2" ry="2" />
+<text text-anchor="" x="718.59" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.stream.Collectors$CollectorImpl.&lt;init&gt;(java.util.function.Supplier, java.util.function.BiConsumer, java.util.function.BinaryOperator, java.util.Set) (4 samples, 0.10%)</title><rect x="225.4" y="261" width="0.8" height="15.0" fill="rgb(224,68,27)" rx="2" ry="2" />
+<text text-anchor="" x="228.41" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.concurrent.CopyOnWriteArrayList.size() (3 samples, 0.08%)</title><rect x="182.9" y="229" width="0.6" height="15.0" fill="rgb(229,201,26)" rx="2" ry="2" />
+<text text-anchor="" x="185.89" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList$Itr.checkForComodification() (4 samples, 0.10%)</title><rect x="594.8" y="213" width="0.9" height="15.0" fill="rgb(238,203,2)" rx="2" ry="2" />
+<text text-anchor="" x="597.85" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.append(java.lang.String) (50 samples, 1.29%)</title><rect x="581.6" y="197" width="10.0" height="15.0" fill="rgb(231,43,46)" rx="2" ry="2" />
+<text text-anchor="" x="584.61" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.HashMap$EntryIterator.next() (32 samples, 0.82%)</title><rect x="722.6" y="261" width="6.4" height="15.0" fill="rgb(235,216,40)" rx="2" ry="2" />
+<text text-anchor="" x="725.61" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.nio.HeapByteBuffer.compact() (1 samples, 0.03%)</title><rect x="788.0" y="133" width="0.2" height="15.0" fill="rgb(205,178,50)" rx="2" ry="2" />
+<text text-anchor="" x="790.99" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.lang.AbstractStringBuilder.&lt;init&gt;(int) (2 samples, 0.05%)</title><rect x="575.0" y="213" width="0.4" height="15.0" fill="rgb(219,218,6)" rx="2" ry="2" />
+<text text-anchor="" x="577.99" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>java.util.ArrayList.grow(int) (27 samples, 0.69%)</title><rect x="517.6" y="197" width="5.4" height="15.0" fill="rgb(240,70,24)" rx="2" ry="2" />
+<text text-anchor="" x="520.63" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+</svg>
