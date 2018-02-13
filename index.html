@@ -240,6 +240,7 @@ ffffffff8173186d system_call_fastpath ([kernel.kallsyms])
 	main;zas 15
 						</code>
 					</pre>
+					<span class="code-style">cat stacks.txt | flamegraph.pl  > flamegraph.svg</span>
 				</section>
 				<section>
 					<h3>Fichero de stacks</h3>
@@ -276,6 +277,10 @@ ffffffff8173186d system_call_fastpath ([kernel.kallsyms])
 						<li class="fragment">Parte superior "visible" es el consumo de CPU</li>
 						<li class="fragment">Colores aleatorios</li>
 					</ul>
+				</section>
+				<section>
+					<h3>Interpretación</h3>
+					<object data="images/wide-height-stack.svg" type="image/svg+xml" style="max-width: 1015px;width: 1015px"></object>
 				</section>
 				<section>
 					<h3>¿Cómo generamos los Stacks?</h3>
